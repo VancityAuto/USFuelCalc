@@ -272,6 +272,18 @@
       <h3 style="margin:0; color:var(--accent);">US Border Gas Stations</h3>
       <button class="btn-action" style="width: auto; padding: 4px 12px;" onclick="closeMapModal()">✕ Close</button>
     </div>
+    
+    <!-- Quick-Jump Border Area Preset Dropdown -->
+    <div style="margin-top: 8px;">
+      <select id="mapAreaPreset" onchange="jumpToMapPreset()">
+        <option value="blaine">📍 Quick Jump: Blaine / Peace Arch (I-5)</option>
+        <option value="truck">📍 Quick Jump: Pacific Highway / Truck Crossing</option>
+        <option value="lynden">📍 Quick Jump: Lynden / Aldergrove (Hwy 13)</option>
+        <option value="sumas">📍 Quick Jump: Sumas / Abbotsford (Hwy 11)</option>
+        <option value="bellingham">📍 Quick Jump: Bellingham South Corridor</option>
+      </select>
+    </div>
+
     <div id="mapStatus" class="loading-text" style="margin-top:4px;">Pan/zoom map to load nearby gas stations...</div>
     <div id="map"></div>
   </div>
@@ -298,6 +310,14 @@
     "pacific-highway": "https://www.drivebc.ca/cameras/15",
     "aldergrove": "https://www.drivebc.ca/cameras/16",
     "abbotsford": "https://www.drivebc.ca/cameras/17"
+  };
+
+  const AREA_PRESETS = {
+    "blaine": [48.9880, -122.7480, 13],
+    "truck": [48.9950, -122.7300, 13],
+    "lynden": [48.9920, -122.4850, 13],
+    "sumas": [48.9980, -122.2680, 13],
+    "bellingham": [48.7500, -122.4700, 12]
   };
 
   const tankDatabase = {
@@ -363,8 +383,7 @@
   function openMapModal() {
     document.getElementById("mapModal").style.display = "flex";
     if (!mapInitialized) {
-      // Default view centred on Blaine/Sumas border area (Peace Arch / Lynden corridor)
-      map = L.map('map').setView([48.9800, -122.7500], 11);
+      map = L.map('map').setView(AREA_PRESETS["blaine"].slice(0,2), AREA_PRESETS["blaine"][2]);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap'
       }).addTo(map);
@@ -378,6 +397,14 @@
       map.invalidateSize();
       fetchNearbyGasStations();
     }, 200);
+  }
+
+  function jumpToMapPreset() {
+    const val = document.getElementById("mapAreaPreset").value;
+    if (map && AREA_PRESETS[val]) {
+      const [lat, lng, zoom] = AREA_PRESETS[val];
+      map.setView([lat, lng], zoom);
+    }
   }
 
   function closeMapModal() {
@@ -397,7 +424,6 @@
     mapStatus.textContent = "Loading gas stations in view...";
 
     const bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
-    // Query nodes, ways, and relations for fuel amenities, returning center coordinates
     const overpassUrl = `https://overpass-api.de/api/interpreter?data=[out:json];(node[amenity=fuel](${bbox});way[amenity=fuel](${bbox});relation[amenity=fuel](${bbox}););out center 50;`;
 
     try {
@@ -410,7 +436,6 @@
         return;
       }
 
-      // Safe update: only clear old markers once new data is successfully fetched
       markersGroup.clearLayers();
 
       data.elements.forEach(st => {
@@ -434,7 +459,7 @@
         markersGroup.addLayer(marker);
       });
 
-      mapStatus.textContent = `Found ${markersGroup.getLayers().length} gas stations. Click pins to select.`;
+      mapStatus.textContent = `Found ${markersGroup.getLayers().length} gas stations in view. Click pins to select.`;
     } catch (e) {
       mapStatus.textContent = "Error loading stations. Try panning or zooming.";
     }
@@ -511,4 +536,9 @@
       selectedStationName: document.getElementById("selectedStationName").value,
       tankCapacity: document.getElementById("tankCapacity").value,
       fuelLevel: document.getElementById("fuelLevel").value,
-      usPrice: document
+      usPrice: document.getElementById("usPrice").value,
+      cadLocalPrice: document.getElementById("cadLocalPrice").value,
+      fxRate: document.getElementById("fxRate").value,
+      roundTripKm: document.getElementById("roundTripKm").value,
+      fuelConsumption: document.getElementById("fuelConsumption").value,
+      borderCrossing: document.getElementById("border
