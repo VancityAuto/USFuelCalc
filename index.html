@@ -28,7 +28,7 @@
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 24px;
-      max-width: 420px;
+      max-width: 440px;
       width: 100%;
       box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
     }
@@ -53,7 +53,7 @@
       border: 1px solid var(--border);
       background-color: #0f172a;
       color: var(--text);
-      font-size: 1rem;
+      font-size: 0.95rem;
       box-sizing: border-box;
     }
     .grid-3 {
@@ -78,6 +78,11 @@
       font-weight: bold;
       color: var(--accent);
     }
+    .loading-text {
+      font-size: 0.8rem;
+      color: #94a3b8;
+      margin-top: 4px;
+    }
   </style>
 </head>
 <body>
@@ -89,10 +94,11 @@
   <div class="form-group">
     <label>Select Vehicle (Year / Make / Model)</label>
     <div class="grid-3">
-      <select id="yearSelect" onchange="updateMakes()"><option value="">Year</option></select>
-      <select id="makeSelect" onchange="updateModels()" disabled><option value="">Make</option></select>
-      <select id="modelSelect" onchange="applyVehicleSpecs()" disabled><option value="">Model</option></select>
+      <select id="yearSelect" onchange="fetchMakes()"><option value="">Year</option></select>
+      <select id="makeSelect" onchange="fetchModels()" disabled><option value="">Make</option></select>
+      <select id="modelSelect" onchange="onModelSelected()" disabled><option value="">Model</option></select>
     </div>
+    <div id="statusText" class="loading-text"></div>
   </div>
 
   <!-- Fuel Tank Capacity -->
@@ -150,53 +156,33 @@
 </div>
 
 <script>
-  // Vehicle database preset (Easily expandable)
-  const vehicleData = {
+  const yearSelect = document.getElementById("yearSelect");
+  const makeSelect = document.getElementById("makeSelect");
+  const modelSelect = document.getElementById("modelSelect");
+  const statusText = document.getElementById("statusText");
+
+  // Known tank size mapping database (Litres) for auto-population
+  const tankDatabase = {
     "2011": {
-      "Honda": {
-        "CR-V": 58,
-        "Civic": 50,
-        "Accord": 70,
-        "Pilot": 79
-      },
-      "Toyota": {
-        "RAV4": 60,
-        "Corolla": 50,
-        "Camry": 70
-      },
-      "Ford": {
-        "Escape": 62,
-        "F-150": 98
-      }
-    },
-    "2012": {
-      "Honda": {
+      "HONDA": {
         "CR-V": 58,
         "Civic": 50,
         "Accord": 70
       },
-      "Toyota": {
+      "TOYOTA": {
         "RAV4": 60,
         "Corolla": 50
+      },
+      "FORD": {
+        "Escape": 62,
+        "F-150": 98
       }
-    },
-    "2015": {
-      "Honda": { "CR-V": 58 },
-      "Toyota": { "RAV4": 60 }
-    },
-    "2020": {
-      "Honda": { "CR-V": 53 },
-      "Toyota": { "RAV4": 55 }
     }
+    // You can easily add more years/makes/models here as needed
   };
 
-  const yearSelect = document.getElementById("yearSelect");
-  const makeSelect = document.getElementById("makeSelect");
-  const modelSelect = document.getElementById("modelSelect");
-
-  // Populate Year dropdown on load
-  function initVehicles() {
-    for (let yr in vehicleData) {
+  function initYears() {
+    for (let yr = 2026; yr >= 2000; yr--) {
       let opt = document.createElement("option");
       opt.value = yr;
       opt.textContent = yr;
@@ -204,56 +190,73 @@
     }
   }
 
-  function updateMakes() {
+  async function fetchMakes() {
+    const yr = yearSelect.value;
     makeSelect.innerHTML = '<option value="">Make</option>';
+    modelSelect.innerHTML = '<option value="">Model</option>';
+    makeSelect.disabled = true;
+    modelSelect.disabled = true;
+
+    if (!yr) return;
+
+    statusText.textContent = "Loading makes...";
+    try {
+      const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/GetMakesForManufacturerAndYear/mod?year=${yr}&format=json`);
+      const data = await res.json();
+      const makes = [...new Set(data.Results.map(item => item.MakeName))].sort();
+      
+      makes.forEach(make => {
+        let opt = document.createElement("option");
+        opt.value = make;
+        opt.textContent = make;
+        makeSelect.appendChild(opt);
+      });
+
+      makeSelect.disabled = false;
+      statusText.textContent = "";
+    } catch (e) {
+      statusText.textContent = "Failed to load makes.";
+    }
+  }
+
+  async function fetchModels() {
+    const yr = yearSelect.value;
+    const make = makeSelect.value;
     modelSelect.innerHTML = '<option value="">Model</option>';
     modelSelect.disabled = true;
 
-    const selectedYear = yearSelect.value;
-    if (!selectedYear) {
-      makeSelect.disabled = true;
-      return;
-    }
+    if (!make) return;
 
-    makeSelect.disabled = false;
-    for (let make in vehicleData[selectedYear]) {
-      let opt = document.createElement("option");
-      opt.value = make;
-      opt.textContent = make;
-      makeSelect.appendChild(opt);
-    }
-  }
+    statusText.textContent = "Loading models...";
+    try {
+      const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/getmodelsformakeyear/make/${encodeURIComponent(make)}/modelyear/${yr}?format=json`);
+      const data = await res.json();
+      const models = [...new Set(data.Results.map(item => item.Model_Name))].sort();
+      
+      models.forEach(model => {
+        let opt = document.createElement("option");
+        opt.value = model;
+        opt.textContent = model;
+        modelSelect.appendChild(opt);
+      });
 
-  function updateModels() {
-    modelSelect.innerHTML = '<option value="">Model</option>';
-    const selectedYear = yearSelect.value;
-    const selectedMake = makeSelect.value;
-
-    if (!selectedMake) {
-      modelSelect.disabled = true;
-      return;
-    }
-
-    modelSelect.disabled = false;
-    const models = vehicleData[selectedYear][selectedMake];
-    for (let model in models) {
-      let opt = document.createElement("option");
-      opt.value = model;
-      opt.textContent = model;
-      modelSelect.appendChild(opt);
+      modelSelect.disabled = false;
+      statusText.textContent = "";
+    } catch (e) {
+      statusText.textContent = "Failed to load models.";
     }
   }
 
-  function applyVehicleSpecs() {
+  function onModelSelected() {
     const yr = yearSelect.value;
-    const mk = makeSelect.value;
-    const md = modelSelect.value;
+    const make = makeSelect.value.toUpperCase();
+    const model = modelSelect.value;
 
-    if (yr && mk && md) {
-      const tankSize = vehicleData[yr][mk][md];
-      document.getElementById("tankCapacity").value = tankSize;
-      calculate();
+    // Check if we have a preset tank size for this vehicle
+    if (tankDatabase[yr] && tankDatabase[yr][make] && tankDatabase[yr][make][model]) {
+      document.getElementById("tankCapacity").value = tankDatabase[yr][make][model];
     }
+    calculate();
   }
 
   function calculate() {
@@ -275,7 +278,7 @@
     document.getElementById("cadPerLitre").textContent = "$" + cadPerLitre.toFixed(3) + " / L";
   }
 
-  initVehicles();
+  initYears();
   calculate();
 </script>
 
