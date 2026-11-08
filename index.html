@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cross-Border Fuel Calculator</title>
+    <style>
+        :root {
+            --primary: #0284c7;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 16px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 480px;
+        }
+        h1 {
+            font-size: 1.5rem;
+            text-align: center;
+            margin-bottom: 24px;
+            color: #0f172a;
+        }
+        .card {
+            background: var(--card);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            margin-bottom: 16px;
+        }
+        label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        input, select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            font-size: 1rem;
+            margin-bottom: 16px;
+            box-sizing: border-box;
+        }
+        button {
+            width: 100%;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        button:hover { background-color: #0369a1; }
+        .results {
+            background: #e0f2fe;
+            border: 1px solid #bae6fd;
+            border-radius: 12px;
+            padding: 16px;
+            display: none;
+        }
+        .result-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 0.95rem;
+        }
+        .result-item.highlight {
+            font-weight: bold;
+            font-size: 1.1rem;
+            color: #0369a1;
+            border-top: 1px solid #bae6fd;
+            padding-top: 8px;
+            margin-top: 8px;
+        }
+        .fx-note {
+            font-size: 0.75rem;
+            text-align: center;
+            color: #64748b;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Border Fuel Calc ⛽</h1>
+
+    <div class="card">
+        <label for="vehicle">Select Vehicle (Tank Size)</label>
+        <select id="vehicle">
+            <option value="55">Compact Sedan / Hatchback (~55L / 14.5 Gal)</option>
+            <option value="65" selected>Mid-size SUV / Crossover (~65L / 17.2 Gal)</option>
+            <option value="80">Full-size Truck / Large SUV (~80L / 21.1 Gal)</option>
+        </select>
+
+        <label for="localPrice">Local Price (CAD per Liter)</label>
+        <input type="number" id="localPrice" step="0.01" value="1.69" placeholder="1.69">
+
+        <label for="usPrice">U.S. Station Price (USD per Gallon)</label>
+        <input type="number" id="usPrice" step="0.01" value="3.49" placeholder="3.49">
+
+        <label for="tripKm">Round-Trip Distance to U.S. Station (km)</label>
+        <input type="number" id="tripKm" value="40" placeholder="40">
+
+        <button onclick="calculateSavings()">Calculate Savings</button>
+    </div>
+
+    <div id="resultsCard" class="results">
+        <div class="result-item">
+            <span>Cost at Local Station:</span>
+            <span id="resLocalCost">$0.00 CAD</span>
+        </div>
+        <div class="result-item">
+            <span>Cost at U.S. Station:</span>
+            <span id="resUsCost">$0.00 CAD</span>
+        </div>
+        <div class="result-item">
+            <span>Estimated Trip Fuel Burn:</span>
+            <span id="resTripBurn">$0.00 CAD</span>
+        </div>
+        <div class="result-item highlight">
+            <span>Net Savings:</span>
+            <span id="resNetSavings">$0.00 CAD</span>
+        </div>
+    </div>
+
+    <div class="fx-note" id="fxRateText">Fetching live exchange rate...</div>
+</div>
+
+<script>
+    let currentExchangeRate = 1.38; // Fallback default
+
+    // Fetch live CAD/USD exchange rate on load
+    async function fetchExchangeRate() {
+        try {
+            let response = await fetch('https://open.er-api.com/v6/latest/USD');
+            let data = await response.json();
+            // API gives USD to CAD (e.g., 1 USD = 1.38 CAD)
+            currentExchangeRate = data.rates.CAD;
+            document.getElementById('fxRateText').innerText = `Live Exchange Rate: 1 USD = ${currentExchangeRate.toFixed(3)} CAD`;
+        } catch (e) {
+            document.getElementById('fxRateText').innerText = `Using estimated exchange rate: 1 USD = ${currentExchangeRate} CAD`;
+        }
+    }
+
+    function calculateSavings() {
+        const tankLiters = parseFloat(document.getElementById('vehicle').value);
+        const localPriceLitre = parseFloat(document.getElementById('localPrice').value);
+        const usPriceGallonUsd = parseFloat(document.getElementById('usPrice').value);
+        const tripKm = parseFloat(document.getElementById('tripKm').value);
+
+        // Constants
+        const litersPerGallonUS = 3.78541;
+        const tankGallonsUS = tankLiters / litersPerGallonUS;
+
+        // 1. Local Fill Cost (CAD)
+        const localTotalCost = tankLiters * localPriceLitre;
+
+        // 2. US Fill Cost (Converted to CAD)
+        const usPriceGallonCad = usPriceGallonUsd * currentExchangeRate;
+        const usPriceLitreCad = usPriceGallonCad / litersPerGallonUS;
+        const usTotalCost = tankLiters * usPriceLitreCad;
+
+        // 3. Trip Overhead Cost (Assuming average consumption of 10L / 100km at local price)
+        const tripFuelBurnedLiters = (tripKm / 100) * 10; 
+        const tripBurnCost = tripFuelBurnedLiters * localPriceLitre;
+
+        // 4. Net Savings
+        // Gross savings minus the gas burned driving down and back
+        const grossSavings = localTotalCost - usTotalCost;
+        const netSavings = grossSavings - tripBurnCost;
+
+        // Render results
+        document.getElementById('resultsCard').style.display = 'block';
+        document.getElementById('resLocalCost').innerText = `$${localTotalCost.toFixed(2)} CAD`;
+        document.getElementById('resUsCost').innerText = `$${usTotalCost.toFixed(2)} CAD`;
+        document.getElementById('resTripBurn').innerText = `-$${tripBurnCost.toFixed(2)} CAD`;
+        
+        const netEl = document.getElementById('resNetSavings');
+        netEl.innerText = `$${netSavings.toFixed(2)} CAD`;
+        netEl.style.color = netSavings > 0 ? '#0369a1' : '#dc2626';
+    }
+
+    fetchExchangeRate();
+</script>
+
+</body>
+</html>
