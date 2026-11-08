@@ -286,7 +286,6 @@
   const modelSelect = document.getElementById("modelSelect");
   const statusText = document.getElementById("statusText");
 
-  // Curated clean list of standard automotive makes
   const POPULAR_MAKES = [
     "ACURA", "AUDI", "BMW", "BUICK", "CADILLAC", "CHEVROLET", "CHRYSLER", 
     "DODGE", "FORD", "GMC", "HONDA", "HYUNDAI", "INFINITI", "JEEP", 
@@ -322,7 +321,7 @@
     const yr = yearSelect.value;
     makeSelect.innerHTML = '<option value="">Make</option>';
     modelSelect.innerHTML = '<option value="">Model</option>';
-    modelSelect.disabled = true;
+    makeSelect.disabled = true;
     modelSelect.disabled = true;
 
     if (!yr) return;
@@ -557,4 +556,48 @@
     const fuelLevel = parseFloat(document.getElementById("fuelLevel").value) || 0;
     const usPrice = parseFloat(document.getElementById("usPrice").value) || 0;
     const cadLocalPrice = parseFloat(document.getElementById("cadLocalPrice").value) || 0;
-    const fxRate =
+    const fxRate = parseFloat(document.getElementById("fxRate").value) || 0;
+    const roundTripKm = parseFloat(document.getElementById("roundTripKm").value) || 0;
+    const fuelConsumption = parseFloat(document.getElementById("fuelConsumption").value) || 0;
+
+    const litresNeeded = tankCapacity * (1 - fuelLevel);
+    const gallonsNeeded = litresNeeded / 3.78541;
+    const totalUSD = gallonsNeeded * usPrice;
+    const totalCAD = totalUSD * fxRate;
+    const cadPerLitre = litresNeeded > 0 ? (totalCAD / litresNeeded) : 0;
+
+    const tripLitresBurned = (roundTripKm * fuelConsumption) / 100;
+    const tripCostCAD = tripLitresBurned * cadPerLitre;
+
+    const localFillCostCAD = litresNeeded * cadLocalPrice;
+    const netSavingsCAD = localFillCostCAD - totalCAD - tripCostCAD;
+
+    document.getElementById("litresNeeded").textContent = litresNeeded.toFixed(1) + " L";
+    document.getElementById("gallonsNeeded").textContent = gallonsNeeded.toFixed(2) + " gal";
+    document.getElementById("costUSD").textContent = "$" + totalUSD.toFixed(2);
+    document.getElementById("costCAD").textContent = "$" + totalCAD.toFixed(2);
+    document.getElementById("cadPerLitre").textContent = "$" + cadPerLitre.toFixed(3) + " / L";
+    document.getElementById("tripFuelBurn").textContent = tripLitresBurned.toFixed(1) + " L ($" + tripCostCAD.toFixed(2) + " CAD)";
+    
+    const netSavingsEl = document.getElementById("netSavings");
+    netSavingsEl.textContent = "$" + netSavingsCAD.toFixed(2);
+    netSavingsEl.style.color = netSavingsCAD >= 0 ? "var(--positive)" : "#ef4444";
+
+    savePresets();
+  }
+
+  // Register Service Worker for PWA Home Screen Installation
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js')
+        .then(reg => console.log('PWA Service Worker Registered', reg))
+        .catch(err => console.error('Service Worker Error', err));
+    });
+  }
+
+  initYears();
+  loadPresets().then(() => calculate());
+</script>
+
+</body>
+</html>
