@@ -135,7 +135,7 @@
   <div class="form-group">
     <label>Select Vehicle (Year / Make / Model)</label>
     <div class="grid-3">
-      <select id="yearSelect" onchange="fetchMakes()"><option value="">Year</option></select>
+      <select id="yearSelect" onchange="onYearSelected()"><option value="">Year</option></select>
       <select id="makeSelect" onchange="fetchModels()" disabled><option value="">Make</option></select>
       <select id="modelSelect" onchange="onModelSelected()" disabled><option value="">Model</option></select>
     </div>
@@ -286,10 +286,12 @@
   const modelSelect = document.getElementById("modelSelect");
   const statusText = document.getElementById("statusText");
 
+  // Curated clean list of standard automotive makes
   const POPULAR_MAKES = [
-    "HONDA", "TOYOTA", "FORD", "CHEVROLET", "NISSAN", "RAM", "GMC", 
-    "HYUNDAI", "KIA", "SUBARU", "VOLKSWAGEN", "MAZDA", "JEEP", "BMW", 
-    "MERCEDES-BENZ", "AUDI", "LEXUS", "ACURA", "DODGE", "CHRYSLER", "BUICK", "CADILLAC"
+    "ACURA", "AUDI", "BMW", "BUICK", "CADILLAC", "CHEVROLET", "CHRYSLER", 
+    "DODGE", "FORD", "GMC", "HONDA", "HYUNDAI", "INFINITI", "JEEP", 
+    "KIA", "LAND ROVER", "LEXUS", "LINCOLN", "MAZDA", "MERCEDES-BENZ", 
+    "MINI", "MITSUBISHI", "NISSAN", "RAM", "SUBARU", "TOYOTA", "VOLKSWAGEN", "VOLVO"
   ];
 
   const cameraLinks = {
@@ -314,6 +316,26 @@
       opt.textContent = yr;
       yearSelect.appendChild(opt);
     }
+  }
+
+  function onYearSelected() {
+    const yr = yearSelect.value;
+    makeSelect.innerHTML = '<option value="">Make</option>';
+    modelSelect.innerHTML = '<option value="">Model</option>';
+    modelSelect.disabled = true;
+    modelSelect.disabled = true;
+
+    if (!yr) return;
+
+    POPULAR_MAKES.forEach(make => {
+      let opt = document.createElement("option");
+      opt.value = make;
+      opt.textContent = make;
+      makeSelect.appendChild(opt);
+    });
+
+    makeSelect.disabled = false;
+    savePresets();
   }
 
   async function fetchExchangeRate() {
@@ -417,48 +439,6 @@
     savePresets();
   }
 
-  async function fetchMakes(targetMake = null) {
-    const yr = yearSelect.value;
-    makeSelect.innerHTML = '<option value="">Make</option>';
-    modelSelect.innerHTML = '<option value="">Model</option>';
-    makeSelect.disabled = true;
-    modelSelect.disabled = true;
-
-    if (!yr) return;
-
-    statusText.textContent = "Loading passenger makes...";
-    try {
-      const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/GetMakesForManufacturerAndYear/mod?year=${yr}&format=json`);
-      const data = await res.json();
-      
-      let allMakes = [...new Set(data.Results.map(item => item.MakeName.trim().toUpperCase()))];
-      
-      const junkKeywords = ["MODULAR", "HOME", "TRAILER", "CONTAINER", "WELDING", "BUILD", "STRUCTURAL", "PARK MODEL", "REMODELING"];
-      let cleanMakes = allMakes.filter(make => !junkKeywords.some(keyword => make.includes(keyword)));
-
-      cleanMakes.sort((a, b) => {
-        let aPop = POPULAR_MAKES.includes(a) ? 0 : 1;
-        let bPop = POPULAR_MAKES.includes(b) ? 0 : 1;
-        if (aPop !== bPop) return aPop - bPop;
-        return a.localeCompare(b);
-      });
-      
-      cleanMakes.forEach(make => {
-        let opt = document.createElement("option");
-        opt.value = make;
-        opt.textContent = make;
-        makeSelect.appendChild(opt);
-      });
-
-      makeSelect.disabled = false;
-      statusText.textContent = "";
-
-      if (targetMake) makeSelect.value = targetMake;
-    } catch (e) {
-      statusText.textContent = "Failed to load makes.";
-    }
-  }
-
   async function fetchModels(targetModel = null) {
     const yr = yearSelect.value;
     const make = makeSelect.value;
@@ -484,6 +464,7 @@
       statusText.textContent = "";
 
       if (targetModel) modelSelect.value = targetModel;
+      savePresets();
     } catch (e) {
       statusText.textContent = "Failed to load models.";
     }
@@ -560,8 +541,9 @@
 
       if (presets.year) {
         yearSelect.value = presets.year;
-        await fetchMakes(presets.make);
+        onYearSelected();
         if (presets.make) {
+          makeSelect.value = presets.make;
           await fetchModels(presets.model);
         }
       }
@@ -575,48 +557,4 @@
     const fuelLevel = parseFloat(document.getElementById("fuelLevel").value) || 0;
     const usPrice = parseFloat(document.getElementById("usPrice").value) || 0;
     const cadLocalPrice = parseFloat(document.getElementById("cadLocalPrice").value) || 0;
-    const fxRate = parseFloat(document.getElementById("fxRate").value) || 0;
-    const roundTripKm = parseFloat(document.getElementById("roundTripKm").value) || 0;
-    const fuelConsumption = parseFloat(document.getElementById("fuelConsumption").value) || 0;
-
-    const litresNeeded = tankCapacity * (1 - fuelLevel);
-    const gallonsNeeded = litresNeeded / 3.78541;
-    const totalUSD = gallonsNeeded * usPrice;
-    const totalCAD = totalUSD * fxRate;
-    const cadPerLitre = litresNeeded > 0 ? (totalCAD / litresNeeded) : 0;
-
-    const tripLitresBurned = (roundTripKm * fuelConsumption) / 100;
-    const tripCostCAD = tripLitresBurned * cadPerLitre;
-
-    const localFillCostCAD = litresNeeded * cadLocalPrice;
-    const netSavingsCAD = localFillCostCAD - totalCAD - tripCostCAD;
-
-    document.getElementById("litresNeeded").textContent = litresNeeded.toFixed(1) + " L";
-    document.getElementById("gallonsNeeded").textContent = gallonsNeeded.toFixed(2) + " gal";
-    document.getElementById("costUSD").textContent = "$" + totalUSD.toFixed(2);
-    document.getElementById("costCAD").textContent = "$" + totalCAD.toFixed(2);
-    document.getElementById("cadPerLitre").textContent = "$" + cadPerLitre.toFixed(3) + " / L";
-    document.getElementById("tripFuelBurn").textContent = tripLitresBurned.toFixed(1) + " L ($" + tripCostCAD.toFixed(2) + " CAD)";
-    
-    const netSavingsEl = document.getElementById("netSavings");
-    netSavingsEl.textContent = "$" + netSavingsCAD.toFixed(2);
-    netSavingsEl.style.color = netSavingsCAD >= 0 ? "var(--positive)" : "#ef4444";
-
-    savePresets();
-  }
-
-  // Register Service Worker for PWA Home Screen Installation
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js')
-        .then(reg => console.log('PWA Service Worker Registered', reg))
-        .catch(err => console.error('Service Worker Error', err));
-    });
-  }
-
-  initYears();
-  loadPresets().then(() => calculate());
-</script>
-
-</body>
-</html>
+    const fxRate =
