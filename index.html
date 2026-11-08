@@ -13,6 +13,7 @@
       --text: #f8fafc;
       --accent: #38bdf8;
       --border: #334155;
+      --positive: #4ade80;
     }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -165,10 +166,37 @@
     <input type="number" step="0.01" id="usPrice" value="3.49" oninput="calculate()">
   </div>
 
-  <!-- Exchange Rate -->
+  <!-- Canadian Local Gas Price (For Net Savings Calculation) -->
   <div class="form-group">
-    <label for="fxRate">Exchange Rate (USD to CAD)</label>
-    <input type="number" step="0.01" id="fxRate" value="1.38" oninput="calculate()">
+    <label for="cadLocalPrice">Local CAD Gas Price ($ CAD / Litre)</label>
+    <input type="number" step="0.001" id="cadLocalPrice" value="1.759" placeholder="e.g. 1.759" oninput="calculate()">
+  </div>
+
+  <!-- Live Exchange Rate -->
+  <div class="form-group">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+      <label for="fxRate" style="margin-bottom:0;">Exchange Rate (USD to CAD)</label>
+      <span id="fxStatus" class="loading-text">Live Rate</span>
+    </div>
+    <div style="display:flex; gap: 8px;">
+      <input type="number" step="0.001" id="fxRate" value="1.380" oninput="calculate()">
+      <button class="btn-action" style="width: auto; padding: 0 12px; white-space: nowrap;" onclick="fetchExchangeRate()">🔄 Auto Fetch</button>
+    </div>
+  </div>
+
+  <!-- Trip Distance & Fuel Consumption Math -->
+  <div class="form-group">
+    <label>Round-Trip Fuel Burn Math</label>
+    <div class="grid-2">
+      <div>
+        <label for="roundTripKm" style="font-size:0.8rem;">Round Trip (km)</label>
+        <input type="number" id="roundTripKm" value="40" placeholder="e.g. 40" oninput="calculate()">
+      </div>
+      <div>
+        <label for="fuelConsumption" style="font-size:0.8rem;">Vehicle L/100km</label>
+        <input type="number" step="0.1" id="fuelConsumption" value="9.8" placeholder="e.g. 9.8" oninput="calculate()">
+      </div>
+    </div>
   </div>
 
   <!-- Border Crossing Section -->
@@ -206,16 +234,24 @@
       <span id="gallonsNeeded">-</span>
     </div>
     <div class="result-row">
-      <span>Total Cost (USD):</span>
+      <span>Fill-Up Cost (USD):</span>
       <span id="costUSD">-</span>
     </div>
     <div class="result-row">
-      <span>Total Cost (CAD):</span>
+      <span>Fill-Up Cost (CAD):</span>
       <span id="costCAD">-</span>
     </div>
     <div class="result-row">
       <span>Equivalent Rate:</span>
       <span id="cadPerLitre">-</span>
+    </div>
+    <div class="result-row">
+      <span>Trip Fuel Burned:</span>
+      <span id="tripFuelBurn">-</span>
+    </div>
+    <div class="result-row" style="margin-top:8px; font-size:1.05rem;">
+      <span>Net Savings (CAD):</span>
+      <span id="netSavings" style="color: var(--positive);">-</span>
     </div>
   </div>
 </div>
@@ -256,6 +292,25 @@
     }
   };
 
+  /* Auto Fetch Live USD to CAD Rate */
+  async function fetchExchangeRate() {
+    const status = document.getElementById("fxStatus");
+    status.textContent = "Fetching live FX...";
+    try {
+      const res = await fetch("https://open.er-api.com/v6/latest/USD");
+      const data = await res.json();
+      if (data && data.rates && data.rates.CAD) {
+        document.getElementById("fxRate").value = data.rates.CAD.toFixed(3);
+        status.textContent = "Updated Live Rate";
+        calculate();
+      } else {
+        status.textContent = "Rate unavailable";
+      }
+    } catch (e) {
+      status.textContent = "FX Fetch Failed";
+    }
+  }
+
   /* Leaflet Map & Overpass Integration */
   let mapInitialized = false;
   let map;
@@ -264,7 +319,6 @@
   function openMapModal() {
     document.getElementById("mapModal").style.display = "flex";
     if (!mapInitialized) {
-      // Default view over Metro Vancouver / WA border, but user can pan anywhere across North America
       map = L.map('map').setView([48.9500, -122.5500], 10);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap'
@@ -290,7 +344,6 @@
     const bounds = map.getBounds();
     const mapStatus = document.getElementById("mapStatus");
     
-    // Limit overpass queries if zoomed out too far
     if (map.getZoom() < 9) {
       mapStatus.textContent = "Zoom in closer to load gas stations.";
       return;
@@ -445,7 +498,10 @@
       tankCapacity: document.getElementById("tankCapacity").value,
       fuelLevel: document.getElementById("fuelLevel").value,
       usPrice: document.getElementById("usPrice").value,
+      cadLocalPrice: document.getElementById("cadLocalPrice").value,
       fxRate: document.getElementById("fxRate").value,
+      roundTripKm: document.getElementById("roundTripKm").value,
+      fuelConsumption: document.getElementById("fuelConsumption").value,
       borderCrossing: document.getElementById("borderCrossing").value
     };
     localStorage.setItem("us_fuel_calc_presets", JSON.stringify(presets));
@@ -453,14 +509,21 @@
 
   async function loadPresets() {
     const saved = localStorage.getItem("us_fuel_calc_presets");
-    if (!saved) return;
+    if (!saved) {
+      await fetchExchangeRate();
+      return;
+    }
 
     try {
       const presets = JSON.parse(saved);
       if (presets.tankCapacity) document.getElementById("tankCapacity").value = presets.tankCapacity;
       if (presets.fuelLevel) document.getElementById("fuelLevel").value = presets.fuelLevel;
       if (presets.usPrice) document.getElementById("usPrice").value = presets.usPrice;
+      if (presets.cadLocalPrice) document.getElementById("cadLocalPrice").value = presets.cadLocalPrice;
       if (presets.fxRate) document.getElementById("fxRate").value = presets.fxRate;
+      if (presets.roundTripKm) document.getElementById("roundTripKm").value = presets.roundTripKm;
+      if (presets.fuelConsumption) document.getElementById("fuelConsumption").value = presets.fuelConsumption;
+      
       if (presets.selectedStationName) {
         document.getElementById("selectedStationName").value = presets.selectedStationName;
         document.getElementById("gasbuddyBtn").href = `https://www.gasbuddy.com/search?q=${encodeURIComponent(presets.selectedStationName)}`;
@@ -486,19 +549,36 @@
     const tankCapacity = parseFloat(document.getElementById("tankCapacity").value) || 0;
     const fuelLevel = parseFloat(document.getElementById("fuelLevel").value) || 0;
     const usPrice = parseFloat(document.getElementById("usPrice").value) || 0;
+    const cadLocalPrice = parseFloat(document.getElementById("cadLocalPrice").value) || 0;
     const fxRate = parseFloat(document.getElementById("fxRate").value) || 0;
+    const roundTripKm = parseFloat(document.getElementById("roundTripKm").value) || 0;
+    const fuelConsumption = parseFloat(document.getElementById("fuelConsumption").value) || 0;
 
+    // Fuel fill calculations
     const litresNeeded = tankCapacity * (1 - fuelLevel);
     const gallonsNeeded = litresNeeded / 3.78541;
     const totalUSD = gallonsNeeded * usPrice;
     const totalCAD = totalUSD * fxRate;
     const cadPerLitre = litresNeeded > 0 ? (totalCAD / litresNeeded) : 0;
 
+    // Round-trip fuel burn calculation (Litres = (km * L/100km) / 100)
+    const tripLitresBurned = (roundTripKm * fuelConsumption) / 100;
+    const tripCostCAD = tripLitresBurned * cadPerLitre;
+
+    // Local fill equivalent cost minus US fill cost and trip fuel burn cost
+    const localFillCostCAD = litresNeeded * cadLocalPrice;
+    const netSavingsCAD = localFillCostCAD - totalCAD - tripCostCAD;
+
     document.getElementById("litresNeeded").textContent = litresNeeded.toFixed(1) + " L";
     document.getElementById("gallonsNeeded").textContent = gallonsNeeded.toFixed(2) + " gal";
     document.getElementById("costUSD").textContent = "$" + totalUSD.toFixed(2);
     document.getElementById("costCAD").textContent = "$" + totalCAD.toFixed(2);
     document.getElementById("cadPerLitre").textContent = "$" + cadPerLitre.toFixed(3) + " / L";
+    document.getElementById("tripFuelBurn").textContent = tripLitresBurned.toFixed(1) + " L ($" + tripCostCAD.toFixed(2) + " CAD)";
+    
+    const netSavingsEl = document.getElementById("netSavings");
+    netSavingsEl.textContent = "$" + netSavingsCAD.toFixed(2);
+    netSavingsEl.style.color = netSavingsCAD >= 0 ? "var(--positive)" : "#ef4444";
 
     savePresets();
   }
