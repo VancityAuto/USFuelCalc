@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>US Fuel Calc</title>
+  <!-- Leaflet CSS for Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     :root {
       --bg: #0f172a;
@@ -37,9 +39,7 @@
       color: var(--accent);
       text-align: center;
     }
-    .form-group {
-      margin-bottom: 16px;
-    }
+    .form-group { margin-bottom: 16px; }
     label {
       display: block;
       font-size: 0.9rem;
@@ -56,31 +56,26 @@
       font-size: 0.95rem;
       box-sizing: border-box;
     }
-    .grid-3 {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 8px;
-    }
-    .grid-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-    }
-    .btn-link {
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    
+    .btn-link, .btn-action {
       display: block;
       text-align: center;
       background-color: #0f172a;
       color: var(--accent);
       border: 1px solid var(--border);
-      padding: 8px;
+      padding: 10px;
       border-radius: 6px;
       text-decoration: none;
       font-size: 0.85rem;
       font-weight: 500;
+      cursor: pointer;
+      width: 100%;
+      box-sizing: border-box;
     }
-    .btn-link:hover {
-      border-color: var(--accent);
-    }
+    .btn-link:hover, .btn-action:hover { border-color: var(--accent); }
+
     .result {
       margin-top: 20px;
       padding: 16px;
@@ -98,11 +93,27 @@
       font-weight: bold;
       color: var(--accent);
     }
-    .loading-text {
-      font-size: 0.8rem;
-      color: #94a3b8;
-      margin-top: 4px;
+    .loading-text { font-size: 0.8rem; color: #94a3b8; margin-top: 4px; }
+
+    /* Map Modal Styling */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.75);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
     }
+    .modal-content {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      width: 90%;
+      max-width: 650px;
+    }
+    #map { height: 380px; border-radius: 8px; margin-top: 10px; }
   </style>
 </head>
 <body>
@@ -119,6 +130,16 @@
       <select id="modelSelect" onchange="onModelSelected()" disabled><option value="">Model</option></select>
     </div>
     <div id="statusText" class="loading-text"></div>
+  </div>
+
+  <!-- Gas Station Selector & Map Modal Trigger -->
+  <div class="form-group">
+    <label for="selectedStationName">Selected Gas Station</label>
+    <input type="text" id="selectedStationName" placeholder="Tap map button below to pick a station" readonly style="margin-bottom: 8px;">
+    <div class="grid-2">
+      <button class="btn-action" onclick="openMapModal()">🗺️ Map Gas Stations</button>
+      <a id="gasbuddyBtn" href="https://www.gasbuddy.com" target="_blank" class="btn-link">⛽ GasBuddy Search</a>
+    </div>
   </div>
 
   <!-- Fuel Tank Capacity -->
@@ -160,13 +181,12 @@
       <option value="aldergrove">Aldergrove / Lynden (Hwy 13)</option>
       <option value="abbotsford">Abbotsford / Sumas (Hwy 11)</option>
     </select>
-    
     <div id="cameraLinkContainer" style="margin-top: 8px; font-size: 0.9rem; display: none;">
       🎥 <a id="cameraLink" href="#" target="_blank" style="color: var(--accent); text-decoration: underline;">View Live Local Camera Feed</a>
     </div>
   </div>
 
-  <!-- National Border Trackers (Fallback for non-local users) -->
+  <!-- National Border Trackers -->
   <div class="form-group">
     <label>National Live Wait Times</label>
     <div class="grid-2">
@@ -200,6 +220,21 @@
   </div>
 </div>
 
+<!-- Leaflet Map Modal -->
+<div id="mapModal" class="modal">
+  <div class="modal-content">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="margin:0; color:var(--accent);">US Border Gas Stations</h3>
+      <button class="btn-action" style="width: auto; padding: 4px 12px;" onclick="closeMapModal()">✕ Close</button>
+    </div>
+    <div id="mapStatus" class="loading-text" style="margin-top:4px;">Pan/zoom map to load nearby gas stations...</div>
+    <div id="map"></div>
+  </div>
+</div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
 <script>
   const yearSelect = document.getElementById("yearSelect");
   const makeSelect = document.getElementById("makeSelect");
@@ -215,21 +250,96 @@
 
   const tankDatabase = {
     "2011": {
-      "HONDA": {
-        "CR-V": 58,
-        "Civic": 50,
-        "Accord": 70
-      },
-      "TOYOTA": {
-        "RAV4": 60,
-        "Corolla": 50
-      },
-      "FORD": {
-        "Escape": 62,
-        "F-150": 98
-      }
+      "HONDA": { "CR-V": 58, "Civic": 50, "Accord": 70 },
+      "TOYOTA": { "RAV4": 60, "Corolla": 50 },
+      "FORD": { "Escape": 62, "F-150": 98 }
     }
   };
+
+  /* Leaflet Map & Overpass Integration */
+  let mapInitialized = false;
+  let map;
+  let markersGroup;
+
+  function openMapModal() {
+    document.getElementById("mapModal").style.display = "flex";
+    if (!mapInitialized) {
+      // Default view over Metro Vancouver / WA border, but user can pan anywhere across North America
+      map = L.map('map').setView([48.9500, -122.5500], 10);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap'
+      }).addTo(map);
+
+      markersGroup = L.layerGroup().addTo(map);
+
+      map.on('moveend', fetchNearbyGasStations);
+      mapInitialized = true;
+    }
+    setTimeout(() => {
+      map.invalidateSize();
+      fetchNearbyGasStations();
+    }, 200);
+  }
+
+  function closeMapModal() {
+    document.getElementById("mapModal").style.display = "none";
+  }
+
+  async function fetchNearbyGasStations() {
+    if (!map) return;
+    const bounds = map.getBounds();
+    const mapStatus = document.getElementById("mapStatus");
+    
+    // Limit overpass queries if zoomed out too far
+    if (map.getZoom() < 9) {
+      mapStatus.textContent = "Zoom in closer to load gas stations.";
+      return;
+    }
+
+    mapStatus.textContent = "Loading gas stations in view...";
+    markersGroup.clearLayers();
+
+    const bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
+    const overpassUrl = `https://overpass-api.de/api/interpreter?data=[out:json];node[amenity=fuel](${bbox});out 50;`;
+
+    try {
+      const res = await fetch(overpassUrl);
+      const data = await res.json();
+      
+      if (!data.elements || data.elements.length === 0) {
+        mapStatus.textContent = "No gas stations found in current view.";
+        return;
+      }
+
+      data.elements.forEach(st => {
+        const name = st.tags.name || st.tags.brand || "Gas Station";
+        const marker = L.marker([st.lat, st.lon]);
+        
+        const gbSearchUrl = `https://www.gasbuddy.com/search?q=${encodeURIComponent(name)}`;
+        const popupHtml = `
+          <div style="font-size:0.9rem;">
+            <b>${name}</b><br>
+            <a href="${gbSearchUrl}" target="_blank" style="color:#0284c7;">Check GasBuddy Prices</a><br>
+            <button onclick="selectStation('${name.replace(/'/g, "\\'")}')" style="margin-top:6px; padding:4px 8px; cursor:pointer;">Select Station</button>
+          </div>
+        `;
+        
+        marker.bindPopup(popupHtml);
+        markersGroup.addLayer(marker);
+      });
+
+      mapStatus.textContent = `Found ${data.elements.length} gas stations. Click pins to select.`;
+    } catch (e) {
+      mapStatus.textContent = "Error loading stations. Try panning or zooming.";
+    }
+  }
+
+  function selectStation(name) {
+    document.getElementById("selectedStationName").value = name;
+    document.getElementById("gasbuddyBtn").href = `https://www.gasbuddy.com/search?q=${encodeURIComponent(name)}`;
+    closeMapModal();
+    savePresets();
+  }
 
   function initYears() {
     for (let yr = 2026; yr >= 2000; yr--) {
@@ -240,7 +350,7 @@
     }
   }
 
-  async function fetchMakes() {
+  async function fetchMakes(targetMake = null) {
     const yr = yearSelect.value;
     makeSelect.innerHTML = '<option value="">Make</option>';
     modelSelect.innerHTML = '<option value="">Model</option>';
@@ -264,12 +374,14 @@
 
       makeSelect.disabled = false;
       statusText.textContent = "";
+
+      if (targetMake) makeSelect.value = targetMake;
     } catch (e) {
       statusText.textContent = "Failed to load makes.";
     }
   }
 
-  async function fetchModels() {
+  async function fetchModels(targetModel = null) {
     const yr = yearSelect.value;
     const make = makeSelect.value;
     modelSelect.innerHTML = '<option value="">Model</option>';
@@ -292,6 +404,8 @@
 
       modelSelect.disabled = false;
       statusText.textContent = "";
+
+      if (targetModel) modelSelect.value = targetModel;
     } catch (e) {
       statusText.textContent = "Failed to load models.";
     }
@@ -319,6 +433,53 @@
     } else {
       container.style.display = "none";
     }
+    savePresets();
+  }
+
+  function savePresets() {
+    const presets = {
+      year: yearSelect.value,
+      make: makeSelect.value,
+      model: modelSelect.value,
+      selectedStationName: document.getElementById("selectedStationName").value,
+      tankCapacity: document.getElementById("tankCapacity").value,
+      fuelLevel: document.getElementById("fuelLevel").value,
+      usPrice: document.getElementById("usPrice").value,
+      fxRate: document.getElementById("fxRate").value,
+      borderCrossing: document.getElementById("borderCrossing").value
+    };
+    localStorage.setItem("us_fuel_calc_presets", JSON.stringify(presets));
+  }
+
+  async function loadPresets() {
+    const saved = localStorage.getItem("us_fuel_calc_presets");
+    if (!saved) return;
+
+    try {
+      const presets = JSON.parse(saved);
+      if (presets.tankCapacity) document.getElementById("tankCapacity").value = presets.tankCapacity;
+      if (presets.fuelLevel) document.getElementById("fuelLevel").value = presets.fuelLevel;
+      if (presets.usPrice) document.getElementById("usPrice").value = presets.usPrice;
+      if (presets.fxRate) document.getElementById("fxRate").value = presets.fxRate;
+      if (presets.selectedStationName) {
+        document.getElementById("selectedStationName").value = presets.selectedStationName;
+        document.getElementById("gasbuddyBtn").href = `https://www.gasbuddy.com/search?q=${encodeURIComponent(presets.selectedStationName)}`;
+      }
+      if (presets.borderCrossing) {
+        document.getElementById("borderCrossing").value = presets.borderCrossing;
+        updateBorderCamera();
+      }
+
+      if (presets.year) {
+        yearSelect.value = presets.year;
+        await fetchMakes(presets.make);
+        if (presets.make) {
+          await fetchModels(presets.model);
+        }
+      }
+    } catch (e) {
+      console.error("Could not load presets", e);
+    }
   }
 
   function calculate() {
@@ -338,10 +499,12 @@
     document.getElementById("costUSD").textContent = "$" + totalUSD.toFixed(2);
     document.getElementById("costCAD").textContent = "$" + totalCAD.toFixed(2);
     document.getElementById("cadPerLitre").textContent = "$" + cadPerLitre.toFixed(3) + " / L";
+
+    savePresets();
   }
 
   initYears();
-  calculate();
+  loadPresets().then(() => calculate());
 </script>
 
 </body>
