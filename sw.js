@@ -1,4 +1,4 @@
-const CACHE_NAME = 'us-fuel-calc-v2';
+const CACHE_NAME = 'us-fuel-calc-v3';
 const ASSETS_TO_CACHE = [
   './index.html',
   './manifest.json',
