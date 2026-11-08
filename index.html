@@ -426,7 +426,6 @@
     const bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
     const query = `[out:json][timeout:10];(node[amenity=fuel](${bbox});way[amenity=fuel](${bbox});relation[amenity=fuel](${bbox}););out center 50;`;
     
-    // Multiple Overpass endpoints to prevent failure if one server throttles
     const endpoints = [
       `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
       `https://overpass.kumi.systems/api/interpreter?data=${encodeURIComponent(query)}`,
@@ -490,4 +489,160 @@
     modelSelect.innerHTML = '<option value="">Model</option>';
     modelSelect.disabled = true;
 
-    if
+    if (!make) return;
+
+    statusText.textContent = "Loading models...";
+    try {
+      const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/getmodelsformakeyear/make/${encodeURIComponent(make)}/modelyear/${yr}?format=json`);
+      const data = await res.json();
+      const models = [...new Set(data.Results.map(item => item.Model_Name.trim()))].sort();
+      
+      models.forEach(model => {
+        let opt = document.createElement("option");
+        opt.value = model;
+        opt.textContent = model;
+        modelSelect.appendChild(opt);
+      });
+
+      modelSelect.disabled = false;
+      statusText.textContent = "";
+
+      if (targetModel) modelSelect.value = targetModel;
+      savePresets();
+    } catch (e) {
+      statusText.textContent = "Failed to load models.";
+    }
+  }
+
+  function onModelSelected() {
+    const yr = yearSelect.value;
+    const make = makeSelect.value.toUpperCase();
+    const model = modelSelect.value;
+
+    if (tankDatabase[yr] && tankDatabase[yr][make] && tankDatabase[yr][make][model]) {
+      document.getElementById("tankCapacity").value = tankDatabase[yr][make][model];
+    }
+    calculate();
+  }
+
+  function updateBorderCamera() {
+    const selected = document.getElementById("borderCrossing").value;
+    const container = document.getElementById("cameraLinkContainer");
+    const link = document.getElementById("cameraLink");
+
+    if (selected && cameraLinks[selected]) {
+      link.href = cameraLinks[selected];
+      container.style.display = "block";
+    } else {
+      container.style.display = "none";
+    }
+    savePresets();
+  }
+
+  function savePresets() {
+    const presets = {
+      year: yearSelect.value,
+      make: makeSelect.value,
+      model: modelSelect.value,
+      selectedStationName: document.getElementById("selectedStationName").value,
+      tankCapacity: document.getElementById("tankCapacity").value,
+      fuelLevel: document.getElementById("fuelLevel").value,
+      usPrice: document.getElementById("usPrice").value,
+      cadLocalPrice: document.getElementById("cadLocalPrice").value,
+      fxRate: document.getElementById("fxRate").value,
+      roundTripKm: document.getElementById("roundTripKm").value,
+      fuelConsumption: document.getElementById("fuelConsumption").value,
+      borderCrossing: document.getElementById("borderCrossing").value
+    };
+    localStorage.setItem("us_fuel_calc_presets", JSON.stringify(presets));
+  }
+
+  async function loadPresets() {
+    const saved = localStorage.getItem("us_fuel_calc_presets");
+    if (!saved) {
+      await fetchExchangeRate();
+      return;
+    }
+
+    try {
+      const presets = JSON.parse(saved);
+      if (presets.tankCapacity) document.getElementById("tankCapacity").value = presets.tankCapacity;
+      if (presets.fuelLevel) document.getElementById("fuelLevel").value = presets.fuelLevel;
+      if (presets.usPrice) document.getElementById("usPrice").value = presets.usPrice;
+      if (presets.cadLocalPrice) document.getElementById("cadLocalPrice").value = presets.cadLocalPrice;
+      if (presets.fxRate) document.getElementById("fxRate").value = presets.fxRate;
+      if (presets.roundTripKm) document.getElementById("roundTripKm").value = presets.roundTripKm;
+      if (presets.fuelConsumption) document.getElementById("fuelConsumption").value = presets.fuelConsumption;
+      
+      if (presets.selectedStationName) {
+        document.getElementById("selectedStationName").value = presets.selectedStationName;
+        document.getElementById("gasbuddyBtn").href = `https://www.gasbuddy.com/search?q=${encodeURIComponent(presets.selectedStationName)}`;
+      }
+      if (presets.borderCrossing) {
+        document.getElementById("borderCrossing").value = presets.borderCrossing;
+        updateBorderCamera();
+      }
+
+      if (presets.year) {
+        yearSelect.value = presets.year;
+        onYearSelected();
+        if (presets.make) {
+          makeSelect.value = presets.make;
+          await fetchModels(presets.model);
+        }
+      }
+    } catch (e) {
+      console.error("Could not load presets", e);
+    }
+  }
+
+  function calculate() {
+    const tankCapacity = parseFloat(document.getElementById("tankCapacity").value) || 0;
+    const fuelLevel = parseFloat(document.getElementById("fuelLevel").value) || 0;
+    const usPrice = parseFloat(document.getElementById("usPrice").value) || 0;
+    const cadLocalPrice = parseFloat(document.getElementById("cadLocalPrice").value) || 0;
+    const fxRate = parseFloat(document.getElementById("fxRate").value) || 0;
+    const roundTripKm = parseFloat(document.getElementById("roundTripKm").value) || 0;
+    const fuelConsumption = parseFloat(document.getElementById("fuelConsumption").value) || 0;
+
+    const litresNeeded = tankCapacity * (1 - fuelLevel);
+    const gallonsNeeded = litresNeeded / 3.78541;
+    const totalUSD = gallonsNeeded * usPrice;
+    const totalCAD = totalUSD * fxRate;
+    const cadPerLitre = litresNeeded > 0 ? (totalCAD / litresNeeded) : 0;
+
+    const tripLitresBurned = (roundTripKm * fuelConsumption) / 100;
+    const tripCostCAD = tripLitresBurned * cadPerLitre;
+
+    const localFillCostCAD = litresNeeded * cadLocalPrice;
+    const netSavingsCAD = localFillCostCAD - totalCAD - tripCostCAD;
+
+    document.getElementById("litresNeeded").textContent = litresNeeded.toFixed(1) + " L";
+    document.getElementById("gallonsNeeded").textContent = gallonsNeeded.toFixed(2) + " gal";
+    document.getElementById("costUSD").textContent = "$" + totalUSD.toFixed(2);
+    document.getElementById("costCAD").textContent = "$" + totalCAD.toFixed(2);
+    document.getElementById("cadPerLitre").textContent = "$" + cadPerLitre.toFixed(3) + " / L";
+    document.getElementById("tripFuelBurn").textContent = tripLitresBurned.toFixed(1) + " L ($" + tripCostCAD.toFixed(2) + " CAD)";
+    
+    const netSavingsEl = document.getElementById("netSavings");
+    netSavingsEl.textContent = "$" + netSavingsCAD.toFixed(2);
+    netSavingsEl.style.color = netSavingsCAD >= 0 ? "var(--positive)" : "#ef4444";
+
+    savePresets();
+  }
+
+  // Register Service Worker for PWA Home Screen Installation
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js')
+        .then(reg => console.log('PWA Service Worker Registered', reg))
+        .catch(err => console.error('Service Worker Error', err));
+    });
+  }
+
+  initYears();
+  loadPresets().then(() => calculate());
+</script>
+
+</body>
+</html>
