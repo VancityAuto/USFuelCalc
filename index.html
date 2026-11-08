@@ -1,16 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <!-- PWA Meta Tags & Web App Manifest -->
-<link rel="manifest" href="./manifest.json">
-<meta name="theme-color" content="#0f172a">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="US Fuel Calc">
-<link rel="apple-touch-icon" href="icon-192.png">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>US Fuel Calc</title>
+  
+  <!-- PWA Meta Tags & Web App Manifest -->
+  <link rel="manifest" href="./manifest.json">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="US Fuel Calc">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
   <!-- Leaflet CSS for Map -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
@@ -173,7 +175,7 @@
     <input type="number" step="0.01" id="usPrice" value="3.49" oninput="calculate()">
   </div>
 
-  <!-- Canadian Local Gas Price (For Net Savings Calculation) -->
+  <!-- Canadian Local Gas Price -->
   <div class="form-group">
     <label for="cadLocalPrice">Local CAD Gas Price ($ CAD / Litre)</label>
     <input type="number" step="0.001" id="cadLocalPrice" value="1.759" placeholder="e.g. 1.759" oninput="calculate()">
@@ -283,6 +285,13 @@
   const makeSelect = document.getElementById("makeSelect");
   const modelSelect = document.getElementById("modelSelect");
   const statusText = document.getElementById("statusText");
+
+  // Major consumer automakers to prioritize at top of dropdown
+  const POPULAR_MAKES = [
+    "HONDA", "TOYOTA", "FORD", "CHEVROLET", "NISSAN", "RAM", "GMC", 
+    "HYUNDAI", "KIA", "SUBARU", "VOLKSWAGEN", "MAZDA", "JEEP", "BMW", 
+    "MERCEDES-BENZ", "AUDI", "LEXUS", "ACURA", "DODGE", "CHRYSLER"
+  ];
 
   const cameraLinks = {
     "peace-arch": "https://www.drivebc.ca/cameras/14",
@@ -419,18 +428,38 @@
 
     if (!yr) return;
 
-    statusText.textContent = "Loading makes...";
+    statusText.textContent = "Loading passenger makes...";
     try {
       const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/GetMakesForManufacturerAndYear/mod?year=${yr}&format=json`);
       const data = await res.json();
-      const makes = [...new Set(data.Results.map(item => item.MakeName))].sort();
       
-      makes.forEach(make => {
+      let allMakes = [...new Set(data.Results.map(item => item.MakeName.trim().toUpperCase()))].sort();
+      
+      // Separate popular passenger makes to the top of the list
+      const popularFound = POPULAR_MAKES.filter(m => allMakes.includes(m));
+      const remainingMakes = allMakes.filter(m => !POPULAR_MAKES.includes(m));
+
+      // Add Popular Section Header
+      let popGroup = document.createElement("optgroup");
+      popGroup.label = "Popular Passenger Makes";
+      popularFound.forEach(make => {
         let opt = document.createElement("option");
         opt.value = make;
         opt.textContent = make;
-        makeSelect.appendChild(opt);
+        popGroup.appendChild(opt);
       });
+      makeSelect.appendChild(popGroup);
+
+      // Add All Other Makes
+      let otherGroup = document.createElement("optgroup");
+      otherGroup.label = "All Other Manufacturers";
+      remainingMakes.forEach(make => {
+        let opt = document.createElement("option");
+        opt.value = make;
+        opt.textContent = make;
+        otherGroup.appendChild(opt);
+      });
+      makeSelect.appendChild(otherGroup);
 
       makeSelect.disabled = false;
       statusText.textContent = "";
@@ -453,7 +482,7 @@
     try {
       const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/getmodelsformakeyear/make/${encodeURIComponent(make)}/modelyear/${yr}?format=json`);
       const data = await res.json();
-      const models = [...new Set(data.Results.map(item => item.Model_Name))].sort();
+      const models = [...new Set(data.Results.map(item => item.Model_Name.trim()))].sort();
       
       models.forEach(model => {
         let opt = document.createElement("option");
@@ -561,18 +590,15 @@
     const roundTripKm = parseFloat(document.getElementById("roundTripKm").value) || 0;
     const fuelConsumption = parseFloat(document.getElementById("fuelConsumption").value) || 0;
 
-    // Fuel fill calculations
     const litresNeeded = tankCapacity * (1 - fuelLevel);
     const gallonsNeeded = litresNeeded / 3.78541;
     const totalUSD = gallonsNeeded * usPrice;
     const totalCAD = totalUSD * fxRate;
     const cadPerLitre = litresNeeded > 0 ? (totalCAD / litresNeeded) : 0;
 
-    // Round-trip fuel burn calculation (Litres = (km * L/100km) / 100)
     const tripLitresBurned = (roundTripKm * fuelConsumption) / 100;
     const tripCostCAD = tripLitresBurned * cadPerLitre;
 
-    // Local fill equivalent cost minus US fill cost and trip fuel burn cost
     const localFillCostCAD = litresNeeded * cadLocalPrice;
     const netSavingsCAD = localFillCostCAD - totalCAD - tripCostCAD;
 
@@ -588,6 +614,15 @@
     netSavingsEl.style.color = netSavingsCAD >= 0 ? "var(--positive)" : "#ef4444";
 
     savePresets();
+  }
+
+  // Register Service Worker for PWA Home Screen Installation
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js')
+        .then(reg => console.log('PWA Service Worker Registered', reg))
+        .catch(err => console.error('Service Worker Error', err));
+    });
   }
 
   initYears();
