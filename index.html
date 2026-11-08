@@ -170,4 +170,481 @@
 
   <!-- US Gas Price -->
   <div class="form-group">
-    <label for="usPrice">
+    <label for="usPrice">US Gas Price ($ USD / US Gallon)</label>
+    <input type="number" step="0.01" id="usPrice" value="3.49" oninput="calculate()">
+  </div>
+
+  <!-- Canadian Local Gas Price -->
+  <div class="form-group">
+    <label for="cadLocalPrice">Local CAD Gas Price ($ CAD / Litre)</label>
+    <input type="number" step="0.001" id="cadLocalPrice" value="1.759" placeholder="e.g. 1.759" oninput="calculate()">
+  </div>
+
+  <!-- Live Exchange Rate -->
+  <div class="form-group">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+      <label for="fxRate" style="margin-bottom:0;">Exchange Rate (USD to CAD)</label>
+      <span id="fxStatus" class="loading-text">Live Rate</span>
+    </div>
+    <div style="display:flex; gap: 8px;">
+      <input type="number" step="0.001" id="fxRate" value="1.380" oninput="calculate()">
+      <button class="btn-action" style="width: auto; padding: 0 12px; white-space: nowrap;" onclick="fetchExchangeRate()">🔄 Auto Fetch</button>
+    </div>
+  </div>
+
+  <!-- Trip Distance & Fuel Consumption Math -->
+  <div class="form-group">
+    <label>Round-Trip Fuel Burn Math</label>
+    <div class="grid-2">
+      <div>
+        <label for="roundTripKm" style="font-size:0.8rem;">Round Trip (km)</label>
+        <input type="number" id="roundTripKm" value="40" placeholder="e.g. 40" oninput="calculate()">
+      </div>
+      <div>
+        <label for="fuelConsumption" style="font-size:0.8rem;">Vehicle L/100km</label>
+        <input type="number" step="0.1" id="fuelConsumption" value="9.8" placeholder="e.g. 9.8" oninput="calculate()">
+      </div>
+    </div>
+  </div>
+
+  <!-- Border Crossing Section -->
+  <div class="form-group">
+    <label for="borderCrossing">Local Border Cameras (BC / WA)</label>
+    <select id="borderCrossing" onchange="updateBorderCamera()">
+      <option value="">Select Local Crossing (Optional)</option>
+      <option value="peace-arch">Peace Arch (Hwy 99 / I-5)</option>
+      <option value="pacific-highway">Pacific Highway (Hwy 15 / Truck Crossing)</option>
+      <option value="aldergrove">Aldergrove / Lynden (Hwy 13)</option>
+      <option value="abbotsford">Abbotsford / Sumas (Hwy 11)</option>
+    </select>
+    <div id="cameraLinkContainer" style="margin-top: 8px; font-size: 0.9rem; display: none;">
+      🎥 <a id="cameraLink" href="#" target="_blank" style="color: var(--accent); text-decoration: underline;">View Live Local Camera Feed</a>
+    </div>
+  </div>
+
+  <!-- National Border Trackers -->
+  <div class="form-group">
+    <label>National Live Wait Times</label>
+    <div class="grid-2">
+      <a href="https://bwt.cbp.gov/" target="_blank" class="btn-link">🇺🇸 US CBP Wait Times</a>
+      <a href="https://www.cbsa-asfc.gc.ca/bwt-taf/menu-eng.html" target="_blank" class="btn-link">🇨🇦 CBSA Wait Times</a>
+    </div>
+  </div>
+
+  <!-- Results Box -->
+  <div class="result">
+    <div class="result-row">
+      <span>Litres Needed:</span>
+      <span id="litresNeeded">-</span>
+    </div>
+    <div class="result-row">
+      <span>Gallons Needed:</span>
+      <span id="gallonsNeeded">-</span>
+    </div>
+    <div class="result-row">
+      <span>Fill-Up Cost (USD):</span>
+      <span id="costUSD">-</span>
+    </div>
+    <div class="result-row">
+      <span>Fill-Up Cost (CAD):</span>
+      <span id="costCAD">-</span>
+    </div>
+    <div class="result-row">
+      <span>Equivalent Rate:</span>
+      <span id="cadPerLitre">-</span>
+    </div>
+    <div class="result-row">
+      <span>Trip Fuel Burned:</span>
+      <span id="tripFuelBurn">-</span>
+    </div>
+    <div class="result-row" style="margin-top:8px; font-size:1.05rem;">
+      <span>Net Savings (CAD):</span>
+      <span id="netSavings" style="color: var(--positive);">-</span>
+    </div>
+  </div>
+</div>
+
+<!-- Leaflet Map Modal -->
+<div id="mapModal" class="modal">
+  <div class="modal-content">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="margin:0; color:var(--accent);">US Border Gas Stations</h3>
+      <button class="btn-action" style="width: auto; padding: 4px 12px;" onclick="closeMapModal()">✕ Close</button>
+    </div>
+    
+    <!-- Quick-Jump Border Area Preset Dropdown -->
+    <div style="margin-top: 8px;">
+      <select id="mapAreaPreset" onchange="jumpToMapPreset()">
+        <option value="blaine">📍 Quick Jump: Blaine / Peace Arch (I-5)</option>
+        <option value="truck">📍 Quick Jump: Pacific Highway / Truck Crossing</option>
+        <option value="lynden">📍 Quick Jump: Lynden / Aldergrove (Hwy 13)</option>
+        <option value="sumas">📍 Quick Jump: Sumas / Abbotsford (Hwy 11)</option>
+        <option value="bellingham">📍 Quick Jump: Bellingham South Corridor</option>
+      </select>
+    </div>
+
+    <div id="mapStatus" class="loading-text" style="margin-top:4px;">Pan/zoom map to load nearby gas stations...</div>
+    <div id="map"></div>
+  </div>
+</div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+  const yearSelect = document.getElementById("yearSelect");
+  const makeSelect = document.getElementById("makeSelect");
+  const modelSelect = document.getElementById("modelSelect");
+  const statusText = document.getElementById("statusText");
+
+  const POPULAR_MAKES = [
+    "ACURA", "AUDI", "BMW", "BUICK", "CADILLAC", "CHEVROLET", "CHRYSLER", 
+    "DODGE", "FORD", "GMC", "HONDA", "HYUNDAI", "INFINITI", "JEEP", 
+    "KIA", "LAND ROVER", "LEXUS", "LINCOLN", "MAZDA", "MERCEDES-BENZ", 
+    "MINI", "MITSUBISHI", "NISSAN", "RAM", "SUBARU", "TOYOTA", "VOLKSWAGEN", "VOLVO"
+  ];
+
+  const cameraLinks = {
+    "peace-arch": "https://www.drivebc.ca/cameras/14",
+    "pacific-highway": "https://www.drivebc.ca/cameras/15",
+    "aldergrove": "https://www.drivebc.ca/cameras/16",
+    "abbotsford": "https://www.drivebc.ca/cameras/17"
+  };
+
+  const AREA_PRESETS = {
+    "blaine": [48.9880, -122.7480, 13],
+    "truck": [48.9950, -122.7300, 13],
+    "lynden": [48.9920, -122.4850, 13],
+    "sumas": [48.9980, -122.2680, 13],
+    "bellingham": [48.7500, -122.4700, 12]
+  };
+
+  const tankDatabase = {
+    "2011": {
+      "HONDA": { "CR-V": 58, "Civic": 50, "Accord": 70 },
+      "TOYOTA": { "RAV4": 60, "Corolla": 50 },
+      "FORD": { "Escape": 62, "F-150": 98 }
+    }
+  };
+
+  function initYears() {
+    yearSelect.innerHTML = '<option value="">Year</option>';
+    for (let yr = 2026; yr >= 2000; yr--) {
+      let opt = document.createElement("option");
+      opt.value = yr;
+      opt.textContent = yr;
+      yearSelect.appendChild(opt);
+    }
+  }
+
+  function onYearSelected() {
+    const yr = yearSelect.value;
+    makeSelect.innerHTML = '<option value="">Make</option>';
+    modelSelect.innerHTML = '<option value="">Model</option>';
+    makeSelect.disabled = true;
+    modelSelect.disabled = true;
+
+    if (!yr) return;
+
+    POPULAR_MAKES.forEach(make => {
+      let opt = document.createElement("option");
+      opt.value = make;
+      opt.textContent = make;
+      makeSelect.appendChild(opt);
+    });
+
+    makeSelect.disabled = false;
+    savePresets();
+  }
+
+  async function fetchExchangeRate() {
+    const status = document.getElementById("fxStatus");
+    status.textContent = "Fetching live FX...";
+    try {
+      const res = await fetch("https://open.er-api.com/v6/latest/USD");
+      const data = await res.json();
+      if (data && data.rates && data.rates.CAD) {
+        document.getElementById("fxRate").value = data.rates.CAD.toFixed(3);
+        status.textContent = "Updated Live Rate";
+        calculate();
+      } else {
+        status.textContent = "Rate unavailable";
+      }
+    } catch (e) {
+      status.textContent = "FX Fetch Failed";
+    }
+  }
+
+  /* Leaflet Map & Resilient Overpass Mirrors */
+  let mapInitialized = false;
+  let map;
+  let markersGroup;
+
+  function openMapModal() {
+    document.getElementById("mapModal").style.display = "flex";
+    if (!mapInitialized) {
+      map = L.map('map').setView(AREA_PRESETS["blaine"].slice(0,2), AREA_PRESETS["blaine"][2]);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap'
+      }).addTo(map);
+
+      markersGroup = L.layerGroup().addTo(map);
+
+      map.on('moveend', fetchNearbyGasStations);
+      mapInitialized = true;
+    }
+    setTimeout(() => {
+      map.invalidateSize();
+      fetchNearbyGasStations();
+    }, 200);
+  }
+
+  function jumpToMapPreset() {
+    const val = document.getElementById("mapAreaPreset").value;
+    if (map && AREA_PRESETS[val]) {
+      const [lat, lng, zoom] = AREA_PRESETS[val];
+      map.setView([lat, lng], zoom);
+    }
+  }
+
+  function closeMapModal() {
+    document.getElementById("mapModal").style.display = "none";
+  }
+
+  async function fetchNearbyGasStations() {
+    if (!map) return;
+    const bounds = map.getBounds();
+    const mapStatus = document.getElementById("mapStatus");
+    
+    if (map.getZoom() < 9) {
+      mapStatus.textContent = "Zoom in closer to load gas stations.";
+      return;
+    }
+
+    mapStatus.textContent = "Loading gas stations in view...";
+
+    const bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
+    const query = `[out:json][timeout:10];(node[amenity=fuel](${bbox});way[amenity=fuel](${bbox});relation[amenity=fuel](${bbox}););out center 50;`;
+    
+    const endpoints = [
+      `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
+      `https://overpass.kumi.systems/api/interpreter?data=${encodeURIComponent(query)}`,
+      `https://api.openstreetmap.fr/oapi/interpreter?data=${encodeURIComponent(query)}`
+    ];
+
+    let data = null;
+    for (const url of endpoints) {
+      try {
+        const res = await fetch(url);
+        if (res.ok) {
+          data = await res.json();
+          if (data && data.elements) break;
+        }
+      } catch (e) {
+        console.warn("Overpass mirror failed, trying next...", url);
+      }
+    }
+
+    if (!data || !data.elements || data.elements.length === 0) {
+      mapStatus.textContent = "No stations returned or network busy. Try panning slightly.";
+      return;
+    }
+
+    markersGroup.clearLayers();
+
+    data.elements.forEach(st => {
+      const lat = st.lat || (st.center && st.center.lat);
+      const lon = st.lon || (st.center && st.center.lon);
+      if (!lat || !lon) return;
+
+      const name = (st.tags && (st.tags.name || st.tags.brand)) || "Gas Station";
+      const marker = L.marker([lat, lon]);
+      
+      const gbSearchUrl = `https://www.gasbuddy.com/search?q=${encodeURIComponent(name)}`;
+      const popupHtml = `
+        <div style="font-size:0.9rem;">
+          <b>${name}</b><br>
+          <a href="${gbSearchUrl}" target="_blank" style="color:#0284c7;">Check GasBuddy Prices</a><br>
+          <button onclick="selectStation('${name.replace(/'/g, "\'")}')" style="margin-top:6px; padding:4px 8px; cursor:pointer;">Select Station</button>
+        </div>
+      `;
+      
+      marker.bindPopup(popupHtml);
+      markersGroup.addLayer(marker);
+    });
+
+    mapStatus.textContent = `Found ${markersGroup.getLayers().length} gas stations in view. Click pins to select.`;
+  }
+
+  function selectStation(name) {
+    document.getElementById("selectedStationName").value = name;
+    document.getElementById("gasbuddyBtn").href = `https://www.gasbuddy.com/search?q=${encodeURIComponent(name)}`;
+    closeMapModal();
+    savePresets();
+  }
+
+  async function fetchModels(targetModel = null) {
+    const yr = yearSelect.value;
+    const make = makeSelect.value;
+    modelSelect.innerHTML = '<option value="">Model</option>';
+    modelSelect.disabled = true;
+
+    if (!make) return;
+
+    statusText.textContent = "Loading models...";
+    try {
+      const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/getmodelsformakeyear/make/${encodeURIComponent(make)}/modelyear/${yr}?format=json`);
+      const data = await res.json();
+      const models = [...new Set(data.Results.map(item => item.Model_Name.trim()))].sort();
+      
+      models.forEach(model => {
+        let opt = document.createElement("option");
+        opt.value = model;
+        opt.textContent = model;
+        modelSelect.appendChild(opt);
+      });
+
+      modelSelect.disabled = false;
+      statusText.textContent = "";
+
+      if (targetModel) modelSelect.value = targetModel;
+      savePresets();
+    } catch (e) {
+      statusText.textContent = "Failed to load models.";
+    }
+  }
+
+  function onModelSelected() {
+    const yr = yearSelect.value;
+    const make = makeSelect.value.toUpperCase();
+    const model = modelSelect.value;
+
+    if (tankDatabase[yr] && tankDatabase[yr][make] && tankDatabase[yr][make][model]) {
+      document.getElementById("tankCapacity").value = tankDatabase[yr][make][model];
+    }
+    calculate();
+  }
+
+  function updateBorderCamera() {
+    const selected = document.getElementById("borderCrossing").value;
+    const container = document.getElementById("cameraLinkContainer");
+    const link = document.getElementById("cameraLink");
+
+    if (selected && cameraLinks[selected]) {
+      link.href = cameraLinks[selected];
+      container.style.display = "block";
+    } else {
+      container.style.display = "none";
+    }
+    savePresets();
+  }
+
+  function savePresets() {
+    const presets = {
+      year: yearSelect.value,
+      make: makeSelect.value,
+      model: modelSelect.value,
+      selectedStationName: document.getElementById("selectedStationName").value,
+      tankCapacity: document.getElementById("tankCapacity").value,
+      fuelLevel: document.getElementById("fuelLevel").value,
+      usPrice: document.getElementById("usPrice").value,
+      cadLocalPrice: document.getElementById("cadLocalPrice").value,
+      fxRate: document.getElementById("fxRate").value,
+      roundTripKm: document.getElementById("roundTripKm").value,
+      fuelConsumption: document.getElementById("fuelConsumption").value,
+      borderCrossing: document.getElementById("borderCrossing").value
+    };
+    localStorage.setItem("us_fuel_calc_presets", JSON.stringify(presets));
+  }
+
+  async function loadPresets() {
+    const saved = localStorage.getItem("us_fuel_calc_presets");
+    if (!saved) {
+      await fetchExchangeRate();
+      return;
+    }
+
+    try {
+      const presets = JSON.parse(saved);
+      if (presets.tankCapacity) document.getElementById("tankCapacity").value = presets.tankCapacity;
+      if (presets.fuelLevel) document.getElementById("fuelLevel").value = presets.fuelLevel;
+      if (presets.usPrice) document.getElementById("usPrice").value = presets.usPrice;
+      if (presets.cadLocalPrice) document.getElementById("cadLocalPrice").value = presets.cadLocalPrice;
+      if (presets.fxRate) document.getElementById("fxRate").value = presets.fxRate;
+      if (presets.roundTripKm) document.getElementById("roundTripKm").value = presets.roundTripKm;
+      if (presets.fuelConsumption) document.getElementById("fuelConsumption").value = presets.fuelConsumption;
+      
+      if (presets.selectedStationName) {
+        document.getElementById("selectedStationName").value = presets.selectedStationName;
+        document.getElementById("gasbuddyBtn").href = `https://www.gasbuddy.com/search?q=${encodeURIComponent(presets.selectedStationName)}`;
+      }
+      if (presets.borderCrossing) {
+        document.getElementById("borderCrossing").value = presets.borderCrossing;
+        updateBorderCamera();
+      }
+
+      if (presets.year) {
+        yearSelect.value = presets.year;
+        onYearSelected();
+        if (presets.make) {
+          makeSelect.value = presets.make;
+          await fetchModels(presets.model);
+        }
+      }
+    } catch (e) {
+      console.error("Could not load presets", e);
+    }
+  }
+
+  function calculate() {
+    const tankCapacity = parseFloat(document.getElementById("tankCapacity").value) || 0;
+    const fuelLevel = parseFloat(document.getElementById("fuelLevel").value) || 0;
+    const usPrice = parseFloat(document.getElementById("usPrice").value) || 0;
+    const cadLocalPrice = parseFloat(document.getElementById("cadLocalPrice").value) || 0;
+    const fxRate = parseFloat(document.getElementById("fxRate").value) || 0;
+    const roundTripKm = parseFloat(document.getElementById("roundTripKm").value) || 0;
+    const fuelConsumption = parseFloat(document.getElementById("fuelConsumption").value) || 0;
+
+    const litresNeeded = tankCapacity * (1 - fuelLevel);
+    const gallonsNeeded = litresNeeded / 3.78541;
+    const totalUSD = gallonsNeeded * usPrice;
+    const totalCAD = totalUSD * fxRate;
+    const cadPerLitre = litresNeeded > 0 ? (totalCAD / litresNeeded) : 0;
+
+    const tripLitresBurned = (roundTripKm * fuelConsumption) / 100;
+    const tripCostCAD = tripLitresBurned * cadPerLitre;
+
+    const localFillCostCAD = litresNeeded * cadLocalPrice;
+    const netSavingsCAD = localFillCostCAD - totalCAD - tripCostCAD;
+
+    document.getElementById("litresNeeded").textContent = litresNeeded.toFixed(1) + " L";
+    document.getElementById("gallonsNeeded").textContent = gallonsNeeded.toFixed(2) + " gal";
+    document.getElementById("costUSD").textContent = "$" + totalUSD.toFixed(2);
+    document.getElementById("costCAD").textContent = "$" + totalCAD.toFixed(2);
+    document.getElementById("cadPerLitre").textContent = "$" + cadPerLitre.toFixed(3) + " / L";
+    document.getElementById("tripFuelBurn").textContent = tripLitresBurned.toFixed(1) + " L ($" + tripCostCAD.toFixed(2) + " CAD)";
+    
+    const netSavingsEl = document.getElementById("netSavings");
+    netSavingsEl.textContent = "$" + netSavingsCAD.toFixed(2);
+    netSavingsEl.style.color = netSavingsCAD >= 0 ? "var(--positive)" : "#ef4444";
+
+    savePresets();
+  }
+
+  // Register Service Worker for PWA Home Screen Installation
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js')
+        .then(reg => console.log('PWA Service Worker Registered', reg))
+        .catch(err => console.error('Service Worker Error', err));
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    initYears();
+    loadPresets().then(() => calculate());
+  });
+</script>
+
+</body>
+</html>
