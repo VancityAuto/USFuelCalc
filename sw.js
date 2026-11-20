@@ -1,12 +1,15 @@
-const CACHE_NAME = 'us-fuel-calc-v6';
+const CACHE_NAME = 'us-fuel-calc-v7';
 const ASSETS_TO_CACHE = [
   './manifest.json',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
 ];
 
-// Force immediate activation when updated
+// Pre-cache static assets and activate immediately when updated
 self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS_TO_CACHE))
+  );
   self.skipWaiting();
 });
 
@@ -35,7 +38,7 @@ self.addEventListener('fetch', (event) => {
             return networkResponse;
           });
         })
-        .catch(() => caches.match(event.request))
+        .catch(() => caches.match(event.request).then((res) => res || caches.match('./index.html')))
     );
   } else {
     event.respondWith(
