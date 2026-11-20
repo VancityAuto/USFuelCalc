@@ -165,7 +165,7 @@
       <label for="selectedStationName">Selected Gas Station</label>
       <input type="text" id="selectedStationName" placeholder="Tap map button below to pick a station" readonly style="margin-bottom: 8px;">
       <div class="grid-2">
-        <button type="button" class="btn-action" onclick="openMapModal()">🗺️ Map Gas Stations</button>
+        <button type="button" id="openMapBtn" class="btn-action" onclick="openMapModal()">🗺️ Map Gas Stations</button>
         <a id="gasbuddyBtn" href="https://www.gasbuddy.com/search?q=Blaine%2C%20WA" target="_blank" rel="noopener noreferrer" class="btn-link">⛽ GasBuddy Search</a>
       </div>
     </div>
@@ -353,26 +353,29 @@
     };
 
     function getCityStateQuery(stationTags = {}, fallbackCity = "") {
-      if (stationTags["addr:city"]) {
+      if (stationTags && stationTags["addr:city"]) {
         const state = stationTags["addr:state"] || "WA";
         return `${stationTags["addr:city"]}, ${state}`;
       }
       if (fallbackCity) return fallbackCity;
 
-      const presetKey = document.getElementById("mapAreaPreset")?.value || "blaine";
+      const presetEl = document.getElementById("mapAreaPreset");
+      const presetKey = presetEl ? presetEl.value : "blaine";
       return (AREA_PRESETS[presetKey] && AREA_PRESETS[presetKey].city) || "Blaine, WA";
     }
 
     function updateGasBuddyLink(cityState) {
+      const btn = document.getElementById("gasbuddyBtn");
+      if (!btn) return;
       const targetCityState = cityState || getCityStateQuery();
-      document.getElementById("gasbuddyBtn").href =
-        `https://www.gasbuddy.com/search?q=${encodeURIComponent(targetCityState)}`;
+      btn.href = `https://www.gasbuddy.com/search?q=${encodeURIComponent(targetCityState)}`;
     }
 
     function initYears() {
+      if (!yearSelect) return;
       yearSelect.innerHTML = '<option value="">Year</option>';
       for (let yr = 2026; yr >= 2000; yr--) {
-        let opt = document.createElement("option");
+        const opt = document.createElement("option");
         opt.value = yr;
         opt.textContent = yr;
         yearSelect.appendChild(opt);
@@ -387,7 +390,7 @@
       modelSelect.disabled = true;
       if (!yr) return;
       POPULAR_MAKES.forEach(make => {
-        let opt = document.createElement("option");
+        const opt = document.createElement("option");
         opt.value = make;
         opt.textContent = make;
         makeSelect.appendChild(opt);
@@ -398,19 +401,19 @@
 
     async function fetchExchangeRate() {
       const status = document.getElementById("fxStatus");
-      status.textContent = "Fetching live FX...";
+      if (status) status.textContent = "Fetching live FX...";
       try {
         const res = await fetch("https://open.er-api.com/v6/latest/USD");
         const data = await res.json();
         if (data && data.rates && data.rates.CAD) {
-          document.getElementById("fxRate").value = data.rates.CAD.toFixed(3);
-          status.textContent = "Updated Live Rate";
+          document.getElementById("fxRate").value = Number(data.rates.CAD).toFixed(3);
+          if (status) status.textContent = "Updated Live Rate";
           calculate();
-        } else {
+        } else if (status) {
           status.textContent = "Rate unavailable";
         }
       } catch (e) {
-        status.textContent = "FX Fetch Failed";
+        if (status) status.textContent = "FX Fetch Failed";
       }
     }
 
@@ -451,8 +454,10 @@
           count++;
         }
       });
-      document.getElementById("mapStatus").textContent =
-        `${reasonText} Showing ${count} common border stations.`;
+      const mapStatus = document.getElementById("mapStatus");
+      if (mapStatus) {
+        mapStatus.textContent = `${reasonText} Showing ${count} common border stations.`;
+      }
     }
 
     function fetchWithTimeout(url, timeoutMs = 7000) {
@@ -467,16 +472,18 @@
     function openMapModal() {
       const modal = document.getElementById("mapModal");
       const mapStatus = document.getElementById("mapStatus");
+      if (!modal) return;
       modal.style.display = "flex";
 
       if (typeof L === "undefined") {
-        mapStatus.textContent = "Leaflet map library failed to load. Check network connection.";
+        if (mapStatus) mapStatus.textContent = "Leaflet map library failed to load. Check network connection.";
         return;
       }
 
       try {
         if (!mapInitialized) {
-          const [lat, lng, zoom] = AREA_PRESETS["blaine"].coords;
+          const presetKey = document.getElementById("mapAreaPreset")?.value || "blaine";
+          const [lat, lng, zoom] = (AREA_PRESETS[presetKey] || AREA_PRESETS["blaine"]).coords;
           map = L.map("map").setView([lat, lng], zoom);
           L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
             attribution: "© OpenStreetMap"
@@ -496,7 +503,7 @@
           }
         }, 200);
       } catch (err) {
-        mapStatus.textContent = `Map init error: ${err.message || "unable to start map"}`;
+        if (mapStatus) mapStatus.textContent = `Map init error: ${err.message || "unable to start map"}`;
       }
     }
 
@@ -511,7 +518,8 @@
     }
 
     function closeMapModal() {
-      document.getElementById("mapModal").style.display = "none";
+      const modal = document.getElementById("mapModal");
+      if (modal) modal.style.display = "none";
     }
 
     async function fetchNearbyGasStations() {
@@ -525,13 +533,13 @@
       const mapStatus = document.getElementById("mapStatus");
 
       if (map.getZoom() < 9) {
-        mapStatus.textContent = "Zoom in closer to load gas stations.";
+        if (mapStatus) mapStatus.textContent = "Zoom in closer to load gas stations.";
         return;
       }
 
       isFetchingStations = true;
       queuedFetch = false;
-      mapStatus.textContent = "Loading gas stations in view...";
+      if (mapStatus) mapStatus.textContent = "Loading gas stations in view...";
 
       const bbox = `${bounds.getSouth().toFixed(4)},${bounds.getWest().toFixed(4)},${bounds.getNorth().toFixed(4)},${bounds.getEast().toFixed(4)}`;
       const query = `[out:json][timeout:6];nwr[amenity=fuel](${bbox});out center 40;`;
@@ -560,7 +568,7 @@
               }
               return json;
             } catch (err) {
-              if (err.name === "TimeoutError" || err.name === "AbortError") {
+              if (err && (err.name === "TimeoutError" || err.name === "AbortError")) {
                 lastStatusDetail = "Mirror timed out";
               } else if (!lastStatusDetail.startsWith("Mirror")) {
                 lastStatusDetail = "Network/CORS block on mirror";
@@ -586,9 +594,11 @@
           }
         });
 
-        mapStatus.textContent = count > 0
-          ? `Found ${count} gas stations in view. Click pins to select.`
-          : "No stations returned in view. Try panning slightly.";
+        if (mapStatus) {
+          mapStatus.textContent = count > 0
+            ? `Found ${count} gas stations in view. Click pins to select.`
+            : "No stations returned in view. Try panning slightly.";
+        }
       } catch (err) {
         renderFallbackStations(`${lastStatusDetail}.`);
       } finally {
@@ -620,7 +630,7 @@
         const data = await res.json();
         const models = [...new Set(data.Results.map(item => item.Model_Name.trim()))].sort();
         models.forEach(model => {
-          let opt = document.createElement("option");
+          const opt = document.createElement("option");
           opt.value = model;
           opt.textContent = model;
           modelSelect.appendChild(opt);
@@ -658,31 +668,123 @@
     }
 
     function savePresets() {
-      const presets = {
-        year: yearSelect.value,
-        make: makeSelect.value,
-        model: modelSelect.value,
-        selectedStationName: document.getElementById("selectedStationName").value,
-        mapAreaPreset: document.getElementById("mapAreaPreset").value,
-        tankCapacity: document.getElementById("tankCapacity").value,
-        fuelLevel: document.getElementById("fuelLevel").value,
-        usPrice: document.getElementById("usPrice").value,
-        cadLocalPrice: document.getElementById("cadLocalPrice").value,
-        fxRate: document.getElementById("fxRate").value,
-        roundTripKm: document.getElementById("roundTripKm").value,
-        fuelConsumption: document.getElementById("fuelConsumption").value,
-        borderCrossing: document.getElementById("borderCrossing").value
-      };
-      localStorage.setItem("us_fuel_calc_presets", JSON.stringify(presets));
+      try {
+        const presets = {
+          year: yearSelect.value,
+          make: makeSelect.value,
+          model: modelSelect.value,
+          selectedStationName: document.getElementById("selectedStationName").value,
+          mapAreaPreset: document.getElementById("mapAreaPreset").value,
+          tankCapacity: document.getElementById("tankCapacity").value,
+          fuelLevel: document.getElementById("fuelLevel").value,
+          usPrice: document.getElementById("usPrice").value,
+          cadLocalPrice: document.getElementById("cadLocalPrice").value,
+          fxRate: document.getElementById("fxRate").value,
+          roundTripKm: document.getElementById("roundTripKm").value,
+          fuelConsumption: document.getElementById("fuelConsumption").value,
+          borderCrossing: document.getElementById("borderCrossing").value
+        };
+        localStorage.setItem("us_fuel_calc_presets", JSON.stringify(presets));
+      } catch (e) {
+        // Ignore storage errors in restricted browser modes
+      }
     }
 
     async function loadPresets() {
-      const saved = localStorage.getItem("us_fuel_calc_presets");
+      let saved = null;
+      try {
+        saved = localStorage.getItem("us_fuel_calc_presets");
+      } catch (e) {
+        saved = null;
+      }
+
       if (!saved) {
         updateGasBuddyLink("Blaine, WA");
         await fetchExchangeRate();
         return;
       }
+
       try {
         const presets = JSON.parse(saved);
-        if (presets
+        if (presets.tankCapacity) document.getElementById("tankCapacity").value = presets.tankCapacity;
+        if (presets.fuelLevel) document.getElementById("fuelLevel").value = presets.fuelLevel;
+        if (presets.usPrice) document.getElementById("usPrice").value = presets.usPrice;
+        if (presets.cadLocalPrice) document.getElementById("cadLocalPrice").value = presets.cadLocalPrice;
+        if (presets.fxRate) document.getElementById("fxRate").value = presets.fxRate;
+        if (presets.roundTripKm) document.getElementById("roundTripKm").value = presets.roundTripKm;
+        if (presets.fuelConsumption) document.getElementById("fuelConsumption").value = presets.fuelConsumption;
+        if (presets.mapAreaPreset && AREA_PRESETS[presets.mapAreaPreset]) {
+          document.getElementById("mapAreaPreset").value = presets.mapAreaPreset;
+        }
+        if (presets.selectedStationName) {
+          document.getElementById("selectedStationName").value = presets.selectedStationName;
+          const match = presets.selectedStationName.match(/\(([^)]+)\)\s*$/);
+          updateGasBuddyLink(match ? match[1] : getCityStateQuery());
+        } else {
+          updateGasBuddyLink(getCityStateQuery());
+        }
+        if (presets.borderCrossing) {
+          document.getElementById("borderCrossing").value = presets.borderCrossing;
+          updateBorderCamera();
+        }
+        if (presets.year) {
+          yearSelect.value = presets.year;
+          onYearSelected();
+          if (presets.make) {
+            makeSelect.value = presets.make;
+            await fetchModels(presets.model);
+          }
+        }
+      } catch (e) {
+        console.error("Could not load presets", e);
+      }
+    }
+
+    function calculate() {
+      const tankCapacity = parseFloat(document.getElementById("tankCapacity").value) || 0;
+      const fuelLevel = parseFloat(document.getElementById("fuelLevel").value) || 0;
+      const usPrice = parseFloat(document.getElementById("usPrice").value) || 0;
+      const cadLocalPrice = parseFloat(document.getElementById("cadLocalPrice").value) || 0;
+      const fxRate = parseFloat(document.getElementById("fxRate").value) || 0;
+      const roundTripKm = parseFloat(document.getElementById("roundTripKm").value) || 0;
+      const fuelConsumption = parseFloat(document.getElementById("fuelConsumption").value) || 0;
+
+      const litresNeeded = tankCapacity * (1 - fuelLevel);
+      const gallonsNeeded = litresNeeded / 3.78541;
+      const totalUSD = gallonsNeeded * usPrice;
+      const totalCAD = totalUSD * fxRate;
+      const cadPerLitre = litresNeeded > 0 ? (totalCAD / litresNeeded) : 0;
+      const tripLitresBurned = (roundTripKm * fuelConsumption) / 100;
+      const tripCostCAD = tripLitresBurned * cadPerLitre;
+      const localFillCostCAD = litresNeeded * cadLocalPrice;
+      const netSavingsCAD = localFillCostCAD - totalCAD - tripCostCAD;
+
+      document.getElementById("litresNeeded").textContent = litresNeeded.toFixed(1) + " L";
+      document.getElementById("gallonsNeeded").textContent = gallonsNeeded.toFixed(2) + " gal";
+      document.getElementById("costUSD").textContent = "$" + totalUSD.toFixed(2);
+      document.getElementById("costCAD").textContent = "$" + totalCAD.toFixed(2);
+      document.getElementById("cadPerLitre").textContent = "$" + cadPerLitre.toFixed(3) + " / L";
+      document.getElementById("tripFuelBurn").textContent = tripLitresBurned.toFixed(1) + " L ($" + tripCostCAD.toFixed(2) + " CAD)";
+
+      const netSavingsEl = document.getElementById("netSavings");
+      netSavingsEl.textContent = "$" + netSavingsCAD.toFixed(2);
+      netSavingsEl.style.color = netSavingsCAD >= 0 ? "var(--positive)" : "#ef4444";
+
+      savePresets();
+    }
+
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js")
+          .then(reg => console.log("PWA Service Worker Registered", reg))
+          .catch(err => console.error("Service Worker Error", err));
+      });
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      initYears();
+      loadPresets().finally(() => calculate());
+    });
+  </script>
+</body>
+</html>
