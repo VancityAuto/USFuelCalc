@@ -166,7 +166,7 @@
       <input type="text" id="selectedStationName" placeholder="Tap map button below to pick a station" readonly style="margin-bottom: 8px;">
       <div class="grid-2">
         <button type="button" id="openMapBtn" class="btn-action" onclick="openMapModal()">🗺️ Map Gas Stations</button>
-        <a id="gasbuddyBtn" href="https://www.gasbuddy.com/search?q=Blaine%2C%20WA" target="_blank" rel="noopener noreferrer" class="btn-link">⛽ GasBuddy Search</a>
+        <a id="gasbuddyBtn" href="https://www.gasbuddy.com/home" target="_blank" rel="noopener noreferrer" class="btn-link">⛽ GasBuddy (Blaine, WA)</a>
       </div>
     </div>
 
@@ -352,6 +352,8 @@
       }
     };
 
+    let activeGasBuddyCity = "Blaine, WA";
+
     function getCityStateQuery(stationTags = {}, fallbackCity = "") {
       if (stationTags && stationTags["addr:city"]) {
         const state = stationTags["addr:state"] || "WA";
@@ -366,9 +368,11 @@
 
     function updateGasBuddyLink(cityState) {
       const btn = document.getElementById("gasbuddyBtn");
-      if (!btn) return;
-      const targetCityState = cityState || getCityStateQuery();
-      btn.href = `https://www.gasbuddy.com/search?q=${encodeURIComponent(targetCityState)}`;
+      activeGasBuddyCity = cityState || getCityStateQuery();
+      if (btn) {
+        btn.href = "https://www.gasbuddy.com/home";
+        btn.textContent = `⛽ GasBuddy (${activeGasBuddyCity})`;
+      }
     }
 
     function initYears() {
@@ -427,7 +431,7 @@
 
     function addStationMarker(lat, lon, name, cityState) {
       if (!markersGroup || typeof lat !== "number" || typeof lon !== "number") return false;
-      const gbSearchUrl = `https://www.gasbuddy.com/search?q=${encodeURIComponent(cityState)}`;
+      const gbSearchUrl = "https://www.gasbuddy.com/home";
       const safeName = String(name).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
       const safeCityState = String(cityState).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 
@@ -436,7 +440,7 @@
         <div style="font-size:0.9rem;">
           <b>${name}</b><br>
           <span style="color:#64748b; font-size:0.8rem;">${cityState}</span><br>
-          <a href="${gbSearchUrl}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;">Check GasBuddy Prices (${cityState})</a><br>
+          <a href="${gbSearchUrl}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;">Open GasBuddy (${cityState})</a><br>
           <button type="button" onclick="selectStation('${safeName}', '${safeCityState}')" style="margin-top:6px; padding:4px 8px; cursor:pointer;">Select Station</button>
         </div>
       `;
@@ -624,167 +628,4 @@
       modelSelect.innerHTML = '<option value="">Model</option>';
       modelSelect.disabled = true;
       if (!make) return;
-      statusText.textContent = "Loading models...";
-      try {
-        const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/getmodelsformakeyear/make/${encodeURIComponent(make)}/modelyear/${yr}?format=json`);
-        const data = await res.json();
-        const models = [...new Set(data.Results.map(item => item.Model_Name.trim()))].sort();
-        models.forEach(model => {
-          const opt = document.createElement("option");
-          opt.value = model;
-          opt.textContent = model;
-          modelSelect.appendChild(opt);
-        });
-        modelSelect.disabled = false;
-        statusText.textContent = "";
-        if (targetModel) modelSelect.value = targetModel;
-        savePresets();
-      } catch (e) {
-        statusText.textContent = "Failed to load models.";
-      }
-    }
-
-    function onModelSelected() {
-      const yr = yearSelect.value;
-      const make = makeSelect.value.toUpperCase();
-      const model = modelSelect.value;
-      if (tankDatabase[yr] && tankDatabase[yr][make] && tankDatabase[yr][make][model]) {
-        document.getElementById("tankCapacity").value = tankDatabase[yr][make][model];
-      }
-      calculate();
-    }
-
-    function updateBorderCamera() {
-      const selected = document.getElementById("borderCrossing").value;
-      const container = document.getElementById("cameraLinkContainer");
-      const link = document.getElementById("cameraLink");
-      if (selected && cameraLinks[selected]) {
-        link.href = cameraLinks[selected];
-        container.style.display = "block";
-      } else {
-        container.style.display = "none";
-      }
-      savePresets();
-    }
-
-    function savePresets() {
-      try {
-        const presets = {
-          year: yearSelect.value,
-          make: makeSelect.value,
-          model: modelSelect.value,
-          selectedStationName: document.getElementById("selectedStationName").value,
-          mapAreaPreset: document.getElementById("mapAreaPreset").value,
-          tankCapacity: document.getElementById("tankCapacity").value,
-          fuelLevel: document.getElementById("fuelLevel").value,
-          usPrice: document.getElementById("usPrice").value,
-          cadLocalPrice: document.getElementById("cadLocalPrice").value,
-          fxRate: document.getElementById("fxRate").value,
-          roundTripKm: document.getElementById("roundTripKm").value,
-          fuelConsumption: document.getElementById("fuelConsumption").value,
-          borderCrossing: document.getElementById("borderCrossing").value
-        };
-        localStorage.setItem("us_fuel_calc_presets", JSON.stringify(presets));
-      } catch (e) {
-        // Ignore storage errors in restricted browser modes
-      }
-    }
-
-    async function loadPresets() {
-      let saved = null;
-      try {
-        saved = localStorage.getItem("us_fuel_calc_presets");
-      } catch (e) {
-        saved = null;
-      }
-
-      if (!saved) {
-        updateGasBuddyLink("Blaine, WA");
-        await fetchExchangeRate();
-        return;
-      }
-
-      try {
-        const presets = JSON.parse(saved);
-        if (presets.tankCapacity) document.getElementById("tankCapacity").value = presets.tankCapacity;
-        if (presets.fuelLevel) document.getElementById("fuelLevel").value = presets.fuelLevel;
-        if (presets.usPrice) document.getElementById("usPrice").value = presets.usPrice;
-        if (presets.cadLocalPrice) document.getElementById("cadLocalPrice").value = presets.cadLocalPrice;
-        if (presets.fxRate) document.getElementById("fxRate").value = presets.fxRate;
-        if (presets.roundTripKm) document.getElementById("roundTripKm").value = presets.roundTripKm;
-        if (presets.fuelConsumption) document.getElementById("fuelConsumption").value = presets.fuelConsumption;
-        if (presets.mapAreaPreset && AREA_PRESETS[presets.mapAreaPreset]) {
-          document.getElementById("mapAreaPreset").value = presets.mapAreaPreset;
-        }
-        if (presets.selectedStationName) {
-          document.getElementById("selectedStationName").value = presets.selectedStationName;
-          const match = presets.selectedStationName.match(/\(([^)]+)\)\s*$/);
-          updateGasBuddyLink(match ? match[1] : getCityStateQuery());
-        } else {
-          updateGasBuddyLink(getCityStateQuery());
-        }
-        if (presets.borderCrossing) {
-          document.getElementById("borderCrossing").value = presets.borderCrossing;
-          updateBorderCamera();
-        }
-        if (presets.year) {
-          yearSelect.value = presets.year;
-          onYearSelected();
-          if (presets.make) {
-            makeSelect.value = presets.make;
-            await fetchModels(presets.model);
-          }
-        }
-      } catch (e) {
-        console.error("Could not load presets", e);
-      }
-    }
-
-    function calculate() {
-      const tankCapacity = parseFloat(document.getElementById("tankCapacity").value) || 0;
-      const fuelLevel = parseFloat(document.getElementById("fuelLevel").value) || 0;
-      const usPrice = parseFloat(document.getElementById("usPrice").value) || 0;
-      const cadLocalPrice = parseFloat(document.getElementById("cadLocalPrice").value) || 0;
-      const fxRate = parseFloat(document.getElementById("fxRate").value) || 0;
-      const roundTripKm = parseFloat(document.getElementById("roundTripKm").value) || 0;
-      const fuelConsumption = parseFloat(document.getElementById("fuelConsumption").value) || 0;
-
-      const litresNeeded = tankCapacity * (1 - fuelLevel);
-      const gallonsNeeded = litresNeeded / 3.78541;
-      const totalUSD = gallonsNeeded * usPrice;
-      const totalCAD = totalUSD * fxRate;
-      const cadPerLitre = litresNeeded > 0 ? (totalCAD / litresNeeded) : 0;
-      const tripLitresBurned = (roundTripKm * fuelConsumption) / 100;
-      const tripCostCAD = tripLitresBurned * cadPerLitre;
-      const localFillCostCAD = litresNeeded * cadLocalPrice;
-      const netSavingsCAD = localFillCostCAD - totalCAD - tripCostCAD;
-
-      document.getElementById("litresNeeded").textContent = litresNeeded.toFixed(1) + " L";
-      document.getElementById("gallonsNeeded").textContent = gallonsNeeded.toFixed(2) + " gal";
-      document.getElementById("costUSD").textContent = "$" + totalUSD.toFixed(2);
-      document.getElementById("costCAD").textContent = "$" + totalCAD.toFixed(2);
-      document.getElementById("cadPerLitre").textContent = "$" + cadPerLitre.toFixed(3) + " / L";
-      document.getElementById("tripFuelBurn").textContent = tripLitresBurned.toFixed(1) + " L ($" + tripCostCAD.toFixed(2) + " CAD)";
-
-      const netSavingsEl = document.getElementById("netSavings");
-      netSavingsEl.textContent = "$" + netSavingsCAD.toFixed(2);
-      netSavingsEl.style.color = netSavingsCAD >= 0 ? "var(--positive)" : "#ef4444";
-
-      savePresets();
-    }
-
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js")
-          .then(reg => console.log("PWA Service Worker Registered", reg))
-          .catch(err => console.error("Service Worker Error", err));
-      });
-    }
-
-    document.addEventListener("DOMContentLoaded", () => {
-      initYears();
-      loadPresets().finally(() => calculate());
-    });
-  </script>
-</body>
-</html>
+      statusText.textContent = "Loading
