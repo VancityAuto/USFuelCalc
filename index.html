@@ -149,7 +149,7 @@
   <div class="card">
     <h2>US Fuel Calculator</h2>
 
-    <!-- Vehicle Lookup -->
+    <!-- First Section: Car Info, Tank Capacity & Fuel Economy -->
     <div class="form-group">
       <label>Select Vehicle (Year / Make / Model)</label>
       <div class="grid-3">
@@ -158,9 +158,20 @@
         <select id="modelSelect" onchange="onModelSelected()" disabled><option value="">Model</option></select>
       </div>
       <div id="statusText" class="loading-text"></div>
+
+      <div class="grid-2" style="margin-top: 10px;">
+        <div>
+          <label for="tankCapacity" style="font-size:0.8rem;">Tank Capacity (Litres)</label>
+          <input type="number" id="tankCapacity" value="58" placeholder="e.g. 58" oninput="calculate()">
+        </div>
+        <div>
+          <label for="fuelConsumption" style="font-size:0.8rem;">Vehicle L/100km</label>
+          <input type="number" step="0.1" id="fuelConsumption" value="9.8" placeholder="e.g. 9.8" oninput="calculate()">
+        </div>
+      </div>
     </div>
 
-    <!-- Gas Station Selector & Map Modal Trigger -->
+    <!-- Gas Station Selector, Map Modal Trigger & Round Trip Distance -->
     <div class="form-group">
       <label for="selectedStationName">Selected Gas Station</label>
       <input type="text" id="selectedStationName" placeholder="Tap map button below to pick a station" readonly style="margin-bottom: 8px;">
@@ -168,12 +179,10 @@
         <button type="button" id="openMapBtn" class="btn-action" onclick="openMapModal()">🗺️ Map Gas Stations</button>
         <a id="gasbuddyBtn" href="https://www.gasbuddy.com/home" target="_blank" rel="noopener noreferrer" class="btn-link">⛽ GasBuddy (Blaine, WA)</a>
       </div>
-    </div>
-
-    <!-- Fuel Tank Capacity -->
-    <div class="form-group">
-      <label for="tankCapacity">Tank Capacity (Litres)</label>
-      <input type="number" id="tankCapacity" value="58" placeholder="e.g. 58" oninput="calculate()">
+      <div style="margin-top: 10px;">
+        <label for="roundTripKm" style="font-size:0.8rem;">Round Trip (km)</label>
+        <input type="number" id="roundTripKm" value="40" placeholder="e.g. 40" oninput="calculate()">
+      </div>
     </div>
 
     <!-- Remaining Fuel Level -->
@@ -208,21 +217,6 @@
       <div style="display:flex; gap: 8px;">
         <input type="number" step="0.001" id="fxRate" value="1.380" oninput="calculate()">
         <button type="button" class="btn-action" style="width: auto; padding: 0 12px; white-space: nowrap;" onclick="fetchExchangeRate()">🔄 Auto Fetch</button>
-      </div>
-    </div>
-
-    <!-- Trip Distance & Fuel Consumption Math -->
-    <div class="form-group">
-      <label>Round-Trip Fuel Burn Math</label>
-      <div class="grid-2">
-        <div>
-          <label for="roundTripKm" style="font-size:0.8rem;">Round Trip (km)</label>
-          <input type="number" id="roundTripKm" value="40" placeholder="e.g. 40" oninput="calculate()">
-        </div>
-        <div>
-          <label for="fuelConsumption" style="font-size:0.8rem;">Vehicle L/100km</label>
-          <input type="number" step="0.1" id="fuelConsumption" value="9.8" placeholder="e.g. 9.8" oninput="calculate()">
-        </div>
       </div>
     </div>
 
@@ -628,4 +622,137 @@
       modelSelect.innerHTML = '<option value="">Model</option>';
       modelSelect.disabled = true;
       if (!make) return;
-      statusText.textContent = "Loading
+      statusText.textContent = "Loading models...";
+      try {
+        const res = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/getmodelsformakeyear/make/${encodeURIComponent(make)}/modelyear/${yr}?format=json`);
+        const data = await res.json();
+        const models = [...new Set(data.Results.map(item => item.Model_Name.trim()))].sort();
+        models.forEach(model => {
+          const opt = document.createElement("option");
+          opt.value = model;
+          opt.textContent = model;
+          modelSelect.appendChild(opt);
+        });
+        modelSelect.disabled = false;
+        statusText.textContent = "";
+        if (targetModel) modelSelect.value = targetModel;
+        savePresets();
+      } catch (e) {
+        statusText.textContent = "Failed to load models.";
+      }
+    }
+
+    function onModelSelected() {
+      const yr = yearSelect.value;
+      const make = makeSelect.value.toUpperCase();
+      const model = modelSelect.value;
+      if (tankDatabase[yr] && tankDatabase[yr][make] && tankDatabase[yr][make][model]) {
+        document.getElementById("tankCapacity").value = tankDatabase[yr][make][model];
+      }
+      calculate();
+    }
+
+    function updateBorderCamera() {
+      const selected = document.getElementById("borderCrossing").value;
+      const container = document.getElementById("cameraLinkContainer");
+      const link = document.getElementById("cameraLink");
+      if (selected && cameraLinks[selected]) {
+        link.href = cameraLinks[selected];
+        container.style.display = "block";
+      } else {
+        container.style.display = "none";
+      }
+      savePresets();
+    }
+
+    function savePresets() {
+      try {
+        const presets = {
+          year: yearSelect.value,
+          make: makeSelect.value,
+          model: modelSelect.value,
+          selectedStationName: document.getElementById("selectedStationName").value,
+          mapAreaPreset: document.getElementById("mapAreaPreset").value,
+          tankCapacity: document.getElementById("tankCapacity").value,
+          fuelLevel: document.getElementById("fuelLevel").value,
+          usPrice: document.getElementById("usPrice").value,
+          cadLocalPrice: document.getElementById("cadLocalPrice").value,
+          fxRate: document.getElementById("fxRate").value,
+          roundTripKm: document.getElementById("roundTripKm").value,
+          fuelConsumption: document.getElementById("fuelConsumption").value,
+          borderCrossing: document.getElementById("borderCrossing").value
+        };
+        localStorage.setItem("us_fuel_calc_presets", JSON.stringify(presets));
+      } catch (e) {
+        // Ignore storage errors in restricted browser modes
+      }
+    }
+
+    async function loadPresets() {
+      let saved = null;
+      try {
+        saved = localStorage.getItem("us_fuel_calc_presets");
+      } catch (e) {
+        saved = null;
+      }
+
+      if (!saved) {
+        updateGasBuddyLink("Blaine, WA");
+        await fetchExchangeRate();
+        return;
+      }
+
+      try {
+        const presets = JSON.parse(saved);
+        if (presets.tankCapacity) document.getElementById("tankCapacity").value = presets.tankCapacity;
+        if (presets.fuelLevel) document.getElementById("fuelLevel").value = presets.fuelLevel;
+        if (presets.usPrice) document.getElementById("usPrice").value = presets.usPrice;
+        if (presets.cadLocalPrice) document.getElementById("cadLocalPrice").value = presets.cadLocalPrice;
+        if (presets.fxRate) document.getElementById("fxRate").value = presets.fxRate;
+        if (presets.roundTripKm) document.getElementById("roundTripKm").value = presets.roundTripKm;
+        if (presets.fuelConsumption) document.getElementById("fuelConsumption").value = presets.fuelConsumption;
+        if (presets.mapAreaPreset && AREA_PRESETS[presets.mapAreaPreset]) {
+          document.getElementById("mapAreaPreset").value = presets.mapAreaPreset;
+        }
+        if (presets.selectedStationName) {
+          document.getElementById("selectedStationName").value = presets.selectedStationName;
+          const match = presets.selectedStationName.match(/\(([^)]+)\)\s*$/);
+          updateGasBuddyLink(match ? match[1] : getCityStateQuery());
+        } else {
+          updateGasBuddyLink(getCityStateQuery());
+        }
+        if (presets.borderCrossing) {
+          document.getElementById("borderCrossing").value = presets.borderCrossing;
+          updateBorderCamera();
+        }
+        if (presets.year) {
+          yearSelect.value = presets.year;
+          onYearSelected();
+          if (presets.make) {
+            makeSelect.value = presets.make;
+            await fetchModels(presets.model);
+          }
+        }
+      } catch (e) {
+        console.error("Could not load presets", e);
+      }
+    }
+
+    function calculate() {
+      const tankCapacity = parseFloat(document.getElementById("tankCapacity").value) || 0;
+      const fuelLevel = parseFloat(document.getElementById("fuelLevel").value) || 0;
+      const usPrice = parseFloat(document.getElementById("usPrice").value) || 0;
+      const cadLocalPrice = parseFloat(document.getElementById("cadLocalPrice").value) || 0;
+      const fxRate = parseFloat(document.getElementById("fxRate").value) || 0;
+      const roundTripKm = parseFloat(document.getElementById("roundTripKm").value) || 0;
+      const fuelConsumption = parseFloat(document.getElementById("fuelConsumption").value) || 0;
+
+      const litresNeeded = tankCapacity * (1 - fuelLevel);
+      const gallonsNeeded = litresNeeded / 3.78541;
+      const totalUSD = gallonsNeeded * usPrice;
+      const totalCAD = totalUSD * fxRate;
+      const cadPerLitre = litresNeeded > 0 ? (totalCAD / litresNeeded) : 0;
+      const tripLitresBurned = (roundTripKm * fuelConsumption) / 100;
+      const tripCostCAD = tripLitresBurned * cadPerLitre;
+      const localFillCostCAD = litresNeeded * cadLocalPrice;
+      const netSavingsCAD = localFillCostCAD - totalCAD -
