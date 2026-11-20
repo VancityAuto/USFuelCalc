@@ -181,7 +181,11 @@
       </div>
       <div style="margin-top: 10px;">
         <label for="roundTripKm" style="font-size:0.8rem;">Round Trip (km)</label>
-        <input type="number" id="roundTripKm" value="40" placeholder="e.g. 40" oninput="calculate()">
+        <div style="display:flex; gap: 8px;">
+          <input type="number" step="0.1" id="roundTripKm" value="40" placeholder="e.g. 40" oninput="calculate()">
+          <button type="button" id="autoRouteBtn" class="btn-action" style="width: auto; padding: 0 12px; white-space: nowrap;" onclick="fetchRoundTripDistance()">📍 Auto Round-Trip</button>
+        </div>
+        <div id="routeStatus" class="loading-text"></div>
       </div>
     </div>
 
@@ -347,6 +351,7 @@
     };
 
     let activeGasBuddyCity = "Blaine, WA";
+    let selectedStationCoords = null;
 
     function getCityStateQuery(stationTags = {}, fallbackCity = "") {
       if (stationTags && stationTags["addr:city"]) {
@@ -366,6 +371,79 @@
       if (btn) {
         btn.href = "https://www.gasbuddy.com/home";
         btn.textContent = `⛽ GasBuddy (${activeGasBuddyCity})`;
+      }
+    }
+
+    function haversineKm(lat1, lon1, lat2, lon2) {
+      const toRad = deg => (deg * Math.PI) / 180;
+      const R = 6371;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function getCurrentPositionAsync() {
+      return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+          reject(new Error("Geolocation unsupported"));
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 8000,
+          maximumAge: 60000
+        });
+      });
+    }
+
+    async function fetchRoundTripDistance() {
+      const routeStatus = document.getElementById("routeStatus");
+      const roundTripInput = document.getElementById("roundTripKm");
+
+      let dest = selectedStationCoords;
+      if (!dest) {
+        const presetKey = document.getElementById("mapAreaPreset")?.value || "blaine";
+        const presetCoords = (AREA_PRESETS[presetKey] || AREA_PRESETS["blaine"]).coords;
+        dest = { lat: presetCoords[0], lon: presetCoords[1] };
+      }
+
+      if (routeStatus) routeStatus.textContent = "Getting GPS location...";
+
+      try {
+        const pos = await getCurrentPositionAsync();
+        const userLat = pos.coords.latitude;
+        const userLon = pos.coords.longitude;
+
+        if (routeStatus) routeStatus.textContent = "Calculating driving route via OSRM...";
+        const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${userLon},${userLat};${dest.lon},${dest.lat}?overview=false`;
+        const res = await fetchWithTimeout(osrmUrl, 7000);
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.routes) && data.routes[0] && typeof data.routes[0].distance === "number") {
+            const roundTripKm = ((data.routes[0].distance / 1000) * 2).toFixed(1);
+            roundTripInput.value = roundTripKm;
+            calculate();
+            if (routeStatus) routeStatus.textContent = `OSRM round-trip set to ${roundTripKm} km.`;
+            return;
+          }
+        }
+
+        const straightLineRoundTrip = (haversineKm(userLat, userLon, dest.lat, dest.lon) * 2 * 1.25).toFixed(1);
+        roundTripInput.value = straightLineRoundTrip;
+        calculate();
+        if (routeStatus) routeStatus.textContent = `OSRM busy—estimated ${straightLineRoundTrip} km round-trip.`;
+      } catch (err) {
+        if (routeStatus) {
+          routeStatus.textContent =
+            err && err.code === 1
+              ? "Location permission denied. Enter round-trip km manually."
+              : "Could not get GPS/route. Enter round-trip km manually.";
+        }
       }
     }
 
@@ -435,7 +513,7 @@
           <b>${name}</b><br>
           <span style="color:#64748b; font-size:0.8rem;">${cityState}</span><br>
           <a href="${gbSearchUrl}" target="_blank" rel="noopener noreferrer" style="color:#0284c7;">Open GasBuddy (${cityState})</a><br>
-          <button type="button" onclick="selectStation('${safeName}', '${safeCityState}')" style="margin-top:6px; padding:4px 8px; cursor:pointer;">Select Station</button>
+          <button type="button" onclick="selectStation('${safeName}', '${safeCityState}', ${lat}, ${lon})" style="margin-top:6px; padding:4px 8px; cursor:pointer;">Select Station</button>
         </div>
       `;
       marker.bindPopup(popupHtml);
@@ -608,9 +686,12 @@
       }
     }
 
-    function selectStation(name, cityState = "") {
+    function selectStation(name, cityState = "", lat = null, lon = null) {
       const resolvedCityState = cityState || getCityStateQuery();
       document.getElementById("selectedStationName").value = `${name} (${resolvedCityState})`;
+      if (typeof lat === "number" && typeof lon === "number") {
+        selectedStationCoords = { lat, lon };
+      }
       updateGasBuddyLink(resolvedCityState);
       closeMapModal();
       savePresets();
@@ -672,6 +753,7 @@
           make: makeSelect.value,
           model: modelSelect.value,
           selectedStationName: document.getElementById("selectedStationName").value,
+          selectedStationCoords: selectedStationCoords,
           mapAreaPreset: document.getElementById("mapAreaPreset").value,
           tankCapacity: document.getElementById("tankCapacity").value,
           fuelLevel: document.getElementById("fuelLevel").value,
@@ -711,48 +793,8 @@
         if (presets.fxRate) document.getElementById("fxRate").value = presets.fxRate;
         if (presets.roundTripKm) document.getElementById("roundTripKm").value = presets.roundTripKm;
         if (presets.fuelConsumption) document.getElementById("fuelConsumption").value = presets.fuelConsumption;
+        if (presets.selectedStationCoords && typeof presets.selectedStationCoords.lat === "number" && typeof presets.selectedStationCoords.lon === "number") {
+          selectedStationCoords = presets.selectedStationCoords;
+        }
         if (presets.mapAreaPreset && AREA_PRESETS[presets.mapAreaPreset]) {
-          document.getElementById("mapAreaPreset").value = presets.mapAreaPreset;
-        }
-        if (presets.selectedStationName) {
-          document.getElementById("selectedStationName").value = presets.selectedStationName;
-          const match = presets.selectedStationName.match(/\(([^)]+)\)\s*$/);
-          updateGasBuddyLink(match ? match[1] : getCityStateQuery());
-        } else {
-          updateGasBuddyLink(getCityStateQuery());
-        }
-        if (presets.borderCrossing) {
-          document.getElementById("borderCrossing").value = presets.borderCrossing;
-          updateBorderCamera();
-        }
-        if (presets.year) {
-          yearSelect.value = presets.year;
-          onYearSelected();
-          if (presets.make) {
-            makeSelect.value = presets.make;
-            await fetchModels(presets.model);
-          }
-        }
-      } catch (e) {
-        console.error("Could not load presets", e);
-      }
-    }
-
-    function calculate() {
-      const tankCapacity = parseFloat(document.getElementById("tankCapacity").value) || 0;
-      const fuelLevel = parseFloat(document.getElementById("fuelLevel").value) || 0;
-      const usPrice = parseFloat(document.getElementById("usPrice").value) || 0;
-      const cadLocalPrice = parseFloat(document.getElementById("cadLocalPrice").value) || 0;
-      const fxRate = parseFloat(document.getElementById("fxRate").value) || 0;
-      const roundTripKm = parseFloat(document.getElementById("roundTripKm").value) || 0;
-      const fuelConsumption = parseFloat(document.getElementById("fuelConsumption").value) || 0;
-
-      const litresNeeded = tankCapacity * (1 - fuelLevel);
-      const gallonsNeeded = litresNeeded / 3.78541;
-      const totalUSD = gallonsNeeded * usPrice;
-      const totalCAD = totalUSD * fxRate;
-      const cadPerLitre = litresNeeded > 0 ? (totalCAD / litresNeeded) : 0;
-      const tripLitresBurned = (roundTripKm * fuelConsumption) / 100;
-      const tripCostCAD = tripLitresBurned * cadPerLitre;
-      const localFillCostCAD = litresNeeded * cadLocalPrice;
-      const netSavingsCAD = localFillCostCAD - totalCAD -
+          document.getElementById("mapAreaPreset").
