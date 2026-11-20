@@ -1,5 +1,6 @@
-const CACHE_NAME = 'us-fuel-calc-v7';
+const CACHE_NAME = 'us-fuel-calc-v8';
 const ASSETS_TO_CACHE = [
+  './index.html',
   './manifest.json',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'
